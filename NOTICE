@@ -1,0 +1,4 @@
+This product includes software developed by OpenAI from the Codex project.
+The PTY and process-tree implementation under crates/persistent-exec-pty is derived from Codex, licensed under Apache-2.0, and modified for this project's session-owned process lifecycle.
+
+The Windows ConPTY implementation retains the MIT license and copyright notice from WezTerm in its source files.

@@ -1,0 +1,9 @@
+/target
+/node_modules
+/packages/*/dist
+/packages/*/LICENSE
+/packages/*/NOTICE
+*.dylib
+*.so
+*.dll
+.DS_Store

@@ -1,0 +1,19 @@
+{
+  "name": "persistent-exec-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/persistent-exec-node",
+    "packages/persistent-exec-bun",
+    "packages/pi-persistent-exec"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.64.0"
+  }
+}

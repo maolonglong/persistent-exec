@@ -1,0 +1,20 @@
+{
+  "name": "persistent-exec-bin-linux-arm64-musl",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "files": [
+    "*.dylib",
+    "*.so",
+    "*.dll",
+    "NOTICE"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "musl"
+  ]
+}

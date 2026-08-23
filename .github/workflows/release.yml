@@ -1,0 +1,88 @@
+name: Release artifacts
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            package: persistent-exec-bin-darwin-arm64
+            builder: cargo
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            package: persistent-exec-bin-darwin-x64
+            builder: cargo
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            package: persistent-exec-bin-linux-x64-gnu
+            builder: cargo
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            package: persistent-exec-bin-linux-x64-musl
+            builder: cross
+          - runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            package: persistent-exec-bin-linux-arm64-gnu
+            builder: cross
+          - runner: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            package: persistent-exec-bin-linux-arm64-musl
+            builder: cross
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            package: persistent-exec-bin-win32-x64
+            builder: cargo
+          - runner: windows-latest
+            target: aarch64-pc-windows-msvc
+            package: persistent-exec-bin-win32-arm64
+            builder: cargo
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: taiki-e/install-action@cross
+        if: matrix.builder == 'cross'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build native library
+        shell: bash
+        run: ${{ matrix.builder }} build --release -p persistent-exec-ffi --target ${{ matrix.target }}
+      - run: node scripts/stage-native.mjs ${{ matrix.target }} ${{ matrix.package }}
+      - run: mkdir -p artifacts
+        shell: bash
+      - run: npm pack ./packages/${{ matrix.package }} --pack-destination artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package }}
+          path: artifacts/*.tgz
+
+  javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+      # Native optional packages do not exist in npm until the first release.
+      - run: npm install --ignore-scripts
+      - run: npm run build
+      - run: mkdir -p artifacts
+      - run: npm pack ./packages/persistent-exec-node --pack-destination artifacts
+      - run: npm pack ./packages/persistent-exec-bun --pack-destination artifacts
+      - run: npm pack ./packages/pi-persistent-exec --pack-destination artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: javascript-packages
+          path: artifacts/*.tgz
