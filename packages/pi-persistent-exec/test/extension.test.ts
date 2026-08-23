@@ -126,7 +126,8 @@ test("serializes concurrent interactions for one session", async () => {
 
   const script =
     'let buffer="",firstAt=0;process.stdout.write("ready");process.stdin.on("data",data=>{buffer+=data;while(buffer.includes("\\n")){const newline=buffer.indexOf("\\n");buffer=buffer.slice(newline+1);if(firstAt===0){firstAt=Date.now();process.stdout.write("first\\n")}else{process.stdout.write("delay:"+(Date.now()-firstAt)+"\\n");process.exit(0)}}})';
-  const command = `node -e ${JSON.stringify(script)}`;
+  const encodedScript = Buffer.from(script).toString("base64");
+  const command = `node -e "eval(Buffer.from('${encodedScript}','base64').toString())"`;
   const first = await exec.execute(
     "call-start",
     { cmd: command, yield_time_ms: 250 },
