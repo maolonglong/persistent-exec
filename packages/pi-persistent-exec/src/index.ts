@@ -72,7 +72,7 @@ const stdinParameters = Type.Object(
         minimum: 250,
         maximum: MAX_POLL_YIELD_MS,
         description:
-          "Maximum time to wait for output or exit. Defaults to 250 after a write and 5000 when polling.",
+          "Wait before returning output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls default to 5000 ms and may wait up to 300000 ms.",
       }),
     ),
     max_output_tokens: Type.Optional(
@@ -88,6 +88,7 @@ const stdinParameters = Type.Object(
 
 export default function persistentExecExtension(pi: ExtensionAPI): void {
   let runtime: RuntimeApi | null = null;
+  const sessionInteractions = new Map<number, Promise<void>>();
 
   pi.registerTool({
     name: EXEC_TOOL,
@@ -148,29 +149,31 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
     promptSnippet: "Write to or poll a running exec_command session",
     parameters: stdinParameters,
     async execute(_toolCallId, params, signal, onUpdate) {
-      const activeRuntime = requireRuntime(runtime);
-      const chars = params.chars ?? "";
-      if (chars !== "") activeRuntime.write(params.session_id, chars);
+      return withSessionLock(sessionInteractions, params.session_id, signal, async () => {
+        const activeRuntime = requireRuntime(runtime);
+        const chars = params.chars ?? "";
+        if (chars !== "") activeRuntime.write(params.session_id, chars);
 
-      const maxYield = chars === "" ? MAX_POLL_YIELD_MS : MAX_WRITE_YIELD_MS;
-      const defaultYield = chars === "" ? DEFAULT_POLL_YIELD_MS : DEFAULT_WRITE_YIELD_MS;
-      const yieldMs = Math.min(params.yield_time_ms ?? defaultYield, maxYield);
-      const startedAt = performance.now();
-      const waited = await waitForSession(
-        activeRuntime,
-        params.session_id,
-        yieldMs,
-        params.max_output_tokens ?? DEFAULT_OUTPUT_TOKENS,
-        signal,
-        (output) => {
-          onUpdate?.({
-            content: [{ type: "text", text: output }],
-            details: { session_id: params.session_id, output },
-          });
-        },
-      );
+        const maxYield = chars === "" ? MAX_POLL_YIELD_MS : MAX_WRITE_YIELD_MS;
+        const defaultYield = chars === "" ? DEFAULT_POLL_YIELD_MS : DEFAULT_WRITE_YIELD_MS;
+        const yieldMs = Math.min(params.yield_time_ms ?? defaultYield, maxYield);
+        const startedAt = performance.now();
+        const waited = await waitForSession(
+          activeRuntime,
+          params.session_id,
+          yieldMs,
+          params.max_output_tokens ?? DEFAULT_OUTPUT_TOKENS,
+          signal,
+          (output) => {
+            onUpdate?.({
+              content: [{ type: "text", text: output }],
+              details: { session_id: params.session_id, output },
+            });
+          },
+        );
 
-      return toolResult(waited, params.session_id, startedAt);
+        return toolResult(waited, params.session_id, startedAt);
+      });
     },
     renderCall(args, theme) {
       const action = args.chars ? `write ${JSON.stringify(args.chars)}` : "poll";
@@ -197,12 +200,58 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
   pi.on("session_shutdown", async () => {
     runtime?.destroy();
     runtime = null;
+    sessionInteractions.clear();
   });
 }
 
 function requireRuntime(runtime: RuntimeApi | null): RuntimeApi {
   if (!runtime) throw new Error("persistent-exec runtime is not initialized");
   return runtime;
+}
+
+async function withSessionLock<T>(
+  locks: Map<number, Promise<void>>,
+  sessionId: number,
+  signal: AbortSignal | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = locks.get(sessionId) ?? Promise.resolve();
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const current = previous.then(() => gate);
+  locks.set(sessionId, current);
+
+  try {
+    await awaitWithAbort(previous, signal);
+    return await operation();
+  } finally {
+    release?.();
+    if (locks.get(sessionId) === current) locks.delete(sessionId);
+  }
+}
+
+function awaitWithAbort(promise: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return new Promise((resolveWait, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason ?? new Error("command wait aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      () => {
+        signal.removeEventListener("abort", onAbort);
+        resolveWait();
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 async function waitForSession(

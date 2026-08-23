@@ -117,6 +117,49 @@ test("removes bash and runs a persistent stdin session", async () => {
   await harness.handlers.get("session_shutdown")?.();
 });
 
+test("serializes concurrent interactions for one session", async () => {
+  const harness = createHarness();
+  await harness.handlers.get("session_start")?.();
+  const exec = harness.tools.get("exec_command");
+  const stdin = harness.tools.get("write_stdin");
+  if (!exec || !stdin) throw new Error("persistent tools were not registered");
+
+  const script =
+    'let buffer="",firstAt=0;process.stdout.write("ready");process.stdin.on("data",data=>{buffer+=data;while(buffer.includes("\\n")){const newline=buffer.indexOf("\\n");buffer=buffer.slice(newline+1);if(firstAt===0){firstAt=Date.now();process.stdout.write("first\\n")}else{process.stdout.write("delay:"+(Date.now()-firstAt)+"\\n");process.exit(0)}}})';
+  const command = `node -e ${JSON.stringify(script)}`;
+  const first = await exec.execute(
+    "call-start",
+    { cmd: command, yield_time_ms: 250 },
+    undefined,
+    undefined,
+    { cwd: process.cwd() },
+  );
+  const sessionId = Number(first.details.session_id);
+
+  const [firstWrite, secondWrite] = await Promise.all([
+    stdin.execute(
+      "call-first-write",
+      { session_id: sessionId, chars: "one\n", yield_time_ms: 500 },
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    ),
+    stdin.execute(
+      "call-second-write",
+      { session_id: sessionId, chars: "two\n", yield_time_ms: 1_000 },
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    ),
+  ]);
+
+  expect(firstWrite.details.output).toContain("first");
+  const delay = Number(String(secondWrite.details.output).match(/delay:(\d+)/)?.[1]);
+  expect(delay).toBeGreaterThanOrEqual(350);
+  expect(secondWrite.details.exit_code).toBe(0);
+  await harness.handlers.get("session_shutdown")?.();
+});
+
 test("bounds final and partial output while preserving original size", async () => {
   const harness = createHarness();
   await harness.handlers.get("session_start")?.();
