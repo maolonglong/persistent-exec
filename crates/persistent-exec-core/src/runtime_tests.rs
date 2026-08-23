@@ -163,7 +163,7 @@ fn short_output_command() -> &'static str {
 
 #[cfg(windows)]
 fn short_output_command() -> &'static str {
-    "echo|set /p=persistent-exec"
+    "powershell -NoProfile -Command \"[Console]::Out.Write('persistent-exec')\""
 }
 
 #[cfg(unix)]

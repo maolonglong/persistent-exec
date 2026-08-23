@@ -88,7 +88,7 @@ fn short_output_command() -> &'static str {
 
 #[cfg(windows)]
 fn short_output_command() -> &'static str {
-    "echo|set /p=ffi-ok"
+    "powershell -NoProfile -Command \"[Console]::Out.Write('ffi-ok')\""
 }
 
 #[test]
