@@ -77,7 +77,10 @@ fn c_abi_runs_and_polls_a_command() {
         std::thread::sleep(Duration::from_millis(10));
     };
 
-    assert_eq!((output, exit_code), ("ffi-ok".to_string(), 0));
+    assert_eq!(
+        (output, exit_code),
+        (expected_short_output().to_string(), 0)
+    );
     unsafe { persistent_exec_destroy(handle) };
 }
 
@@ -86,9 +89,19 @@ fn short_output_command() -> &'static str {
     "printf ffi-ok"
 }
 
+#[cfg(unix)]
+fn expected_short_output() -> &'static str {
+    "ffi-ok"
+}
+
 #[cfg(windows)]
 fn short_output_command() -> &'static str {
-    "powershell -NoProfile -Command \"[Console]::Out.Write('ffi-ok')\""
+    "echo ffi-ok"
+}
+
+#[cfg(windows)]
+fn expected_short_output() -> &'static str {
+    "ffi-ok\r\n"
 }
 
 #[test]

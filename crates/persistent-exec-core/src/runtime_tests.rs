@@ -58,7 +58,7 @@ fn completed_command_returns_output_and_exit_code() {
     assert_eq!(
         response,
         PollResponse {
-            output: b"persistent-exec".to_vec(),
+            output: expected_short_output().to_vec(),
             omitted_bytes: 0,
             exit_code: Some(0),
         }
@@ -161,9 +161,19 @@ fn short_output_command() -> &'static str {
     "printf persistent-exec"
 }
 
+#[cfg(unix)]
+fn expected_short_output() -> &'static [u8] {
+    b"persistent-exec"
+}
+
 #[cfg(windows)]
 fn short_output_command() -> &'static str {
-    "powershell -NoProfile -Command \"[Console]::Out.Write('persistent-exec')\""
+    "echo persistent-exec"
+}
+
+#[cfg(windows)]
+fn expected_short_output() -> &'static [u8] {
+    b"persistent-exec\r\n"
 }
 
 #[cfg(unix)]
