@@ -1,13 +1,21 @@
 {
   "name": "persistent-exec-workspace",
-  "private": true,
   "version": "0.1.0",
-  "type": "module",
+  "private": true,
+  "homepage": "https://github.com/maolonglong/persistent-exec#readme",
+  "bugs": {
+    "url": "https://github.com/maolonglong/persistent-exec/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maolonglong/persistent-exec.git"
+  },
   "workspaces": [
     "packages/persistent-exec-node",
     "packages/persistent-exec-bun",
     "packages/pi-persistent-exec"
   ],
+  "type": "module",
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",

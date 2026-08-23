@@ -1,7 +1,17 @@
 {
   "name": "persistent-exec-bun",
   "version": "0.1.0",
+  "description": "Bun FFI bindings for the persistent-exec native runtime",
+  "homepage": "https://github.com/maolonglong/persistent-exec#readme",
+  "bugs": {
+    "url": "https://github.com/maolonglong/persistent-exec/issues"
+  },
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maolonglong/persistent-exec.git",
+    "directory": "packages/persistent-exec-bun"
+  },
   "files": [
     "src",
     "dist",

@@ -7,6 +7,8 @@
 - Keep one native runtime per pi session and terminate it on session replacement, extension reload, and shutdown.
 - Keep native output and session counts bounded. Partial output must be bounded as well as final output, and truncation metadata must include bytes omitted by the Rust runtime.
 - Unix cleanup owns process groups; Windows cleanup owns Job Objects. Do not claim that Unix processes which deliberately create a new session remain contained.
+- Keep each pi tool's `promptSnippet` to a one-line capability summary. Put the observable call/result contract in `description` and parameter descriptions.
+- Add `promptGuidelines` only for non-obvious behavior that the schema and descriptions cannot express. Do not instruct the model about tools removed from the active set.
 
 ## Cross-platform process behavior
 
@@ -26,4 +28,6 @@
 
 - Keep platform package names synchronized across Node/Bun `optionalDependencies`, both `binary.ts` lookup maps, `scripts/stage-native.mjs`, and the release workflow matrix.
 - Publish npm packages in dependency order: platform binary packages first, Node/Bun wrappers second, and `pi-persistent-exec` last.
+- Treat a pushed `v*` tag as a real npm publish action. Use `workflow_dispatch` to build and inspect release artifacts without publishing.
+- If npm publishing partially fails, rerun only the failed `publish` job from that workflow run so it reuses the original artifacts; never rebuild an already-partially-published tag.
 - Keep package versions synchronized while wrappers use exact versions for native and runtime dependencies.

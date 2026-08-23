@@ -8,7 +8,16 @@
     "pi-package",
     "pty"
   ],
+  "homepage": "https://github.com/maolonglong/persistent-exec#readme",
+  "bugs": {
+    "url": "https://github.com/maolonglong/persistent-exec/issues"
+  },
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maolonglong/persistent-exec.git",
+    "directory": "packages/pi-persistent-exec"
+  },
   "files": [
     "src",
     "NOTICE"

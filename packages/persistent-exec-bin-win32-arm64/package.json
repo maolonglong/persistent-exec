@@ -1,7 +1,17 @@
 {
   "name": "persistent-exec-bin-win32-arm64",
   "version": "0.1.0",
+  "description": "Native persistent-exec runtime for Windows ARM64",
+  "homepage": "https://github.com/maolonglong/persistent-exec#readme",
+  "bugs": {
+    "url": "https://github.com/maolonglong/persistent-exec/issues"
+  },
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maolonglong/persistent-exec.git",
+    "directory": "packages/persistent-exec-bin-win32-arm64"
+  },
   "files": [
     "*.dylib",
     "*.so",
