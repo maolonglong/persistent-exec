@@ -1,8 +1,13 @@
 # persistent-exec
 
-Codex-style persistent command execution for pi.
+Persistent shell sessions for [pi](https://github.com/badlogic/pi-mono).
 
-The pi extension replaces the active `bash` tool with `exec_command` and `write_stdin`. A Rust runtime owns PTY/pipe processes, incremental output, and session cleanup through Unix process groups or Windows Job Objects; thin Node.js and Bun FFI adapters expose it to the extension. Commands run through `$SHELL` on Unix and Windows PowerShell on Windows.
+The `pi-persistent-exec` extension replaces pi's built-in `bash` tool with two tools:
+
+- `exec_command` starts a command and returns its result. If the command is still running, it returns a session ID instead.
+- `write_stdin` sends input to a running session or checks it for more output.
+
+This lets pi run interactive commands and keep long-running processes alive between tool calls. Commands use `$SHELL` on Unix and PowerShell on Windows.
 
 ## Installation
 
@@ -10,9 +15,17 @@ The pi extension replaces the active `bash` tool with `exec_command` and `write_
 pi install npm:pi-persistent-exec
 ```
 
-No configuration is required.
+The extension works without additional configuration.
+
+## Process cleanup
+
+Each pi session gets its own native runtime. Starting a new session, reloading extensions, or exiting pi terminates the processes started by the old runtime. Cleanup uses process groups on Unix and Job Objects on Windows.
+
+A Unix process can escape cleanup if it deliberately starts a new session. The extension runs with the same permissions as pi and does not add a sandbox or approval prompts.
 
 ## Development
+
+Run the formatter, linter, and test suite from the repository root:
 
 ```bash
 make fmt
@@ -20,10 +33,6 @@ make lint
 make test
 ```
 
-## Releasing
-
-Run the `Release artifacts` workflow manually with a `vX.Y.Z` version to build and validate all platform packages without publishing. Pushing the matching `vX.Y.Z` tag builds, validates, and publishes the package set to npm; this requires the repository `NPM_TOKEN` secret.
-
 ## License
 
-Apache-2.0. See `NOTICE` for extracted Codex process-management code attribution.
+Apache-2.0. See `NOTICE` for attribution for the process-management code adapted from Codex.

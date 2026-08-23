@@ -1,7 +1,7 @@
 {
   "name": "pi-persistent-exec",
   "version": "0.1.0",
-  "description": "Codex-style persistent command execution for pi",
+  "description": "Persistent shell sessions for pi",
   "keywords": [
     "persistent-exec",
     "pi-extension",

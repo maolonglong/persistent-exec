@@ -1,8 +1,8 @@
-# codex-utils-pty
+# persistent-exec-pty
 
-Lightweight helpers for spawning interactive processes either under a PTY (pseudo terminal) or regular pipes. The public API is minimal and mirrors both backends so callers can switch based on their needs (e.g., enabling or disabling TTY).
+This crate starts child processes with either a pseudo-terminal (PTY) or regular pipes. Both modes return the same process handle, so callers can choose whether a command needs a terminal without changing the rest of their process-management code.
 
-## API surface
+## Public API
 
 - `spawn_pty_process(program, args, cwd, env, arg0, size)` → `SpawnedProcess`
 - `spawn_pipe_process(program, args, cwd, env, arg0)` → `SpawnedProcess`
@@ -22,9 +22,9 @@ Lightweight helpers for spawning interactive processes either under a PTY (pseud
 ```rust
 use std::collections::HashMap;
 use std::path::Path;
-use codex_utils_pty::combine_output_receivers;
-use codex_utils_pty::spawn_pty_process;
-use codex_utils_pty::TerminalSize;
+use persistent_exec_pty::combine_output_receivers;
+use persistent_exec_pty::spawn_pty_process;
+use persistent_exec_pty::TerminalSize;
 
 # tokio_test::block_on(async {
 let env_map: HashMap<String, String> = std::env::vars().collect();
@@ -52,13 +52,12 @@ let exit_code = spawned.exit_rx.await.unwrap_or(-1);
 # });
 ```
 
-Swap in `spawn_pipe_process` for a non-TTY subprocess; the rest of the API stays the same.
-Use `spawn_pipe_process_no_stdin` to force stdin closed (commands that read stdin will see EOF immediately).
+Use `spawn_pipe_process` when the child does not need a terminal. Use `spawn_pipe_process_no_stdin` when it should see EOF immediately instead of receiving input.
 
 ## Tests
 
-Unit tests live in `src/lib.rs` and cover both backends (PTY Python REPL and pipe-based stdin roundtrip). Run with:
+Run the crate's tests from the repository root:
 
-```
-just test -p codex-utils-pty --no-capture
+```bash
+cargo test -p persistent-exec-pty
 ```
