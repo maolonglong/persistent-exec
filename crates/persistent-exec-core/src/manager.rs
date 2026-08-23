@@ -253,16 +253,13 @@ fn shell_command(cmd: &str) -> (String, Vec<String>) {
 
 #[cfg(windows)]
 fn shell_command(cmd: &str) -> (String, Vec<String>) {
-    let shell = std::env::var("COMSPEC")
-        .ok()
-        .filter(|shell| !shell.is_empty())
-        .unwrap_or_else(|| "cmd.exe".to_string());
     (
-        shell,
+        "powershell.exe".to_string(),
         vec![
-            "/D".to_string(),
-            "/S".to_string(),
-            "/C".to_string(),
+            "-NoLogo".to_string(),
+            "-NoProfile".to_string(),
+            "-NonInteractive".to_string(),
+            "-Command".to_string(),
             cmd.to_string(),
         ],
     )

@@ -6,7 +6,7 @@ Codex-style persistent command execution for pi.
 pi install npm:pi-persistent-exec
 ```
 
-No configuration is required. The extension removes the built-in `bash` tool from the active tool set and enables:
+No configuration is required. Commands run through `$SHELL` on Unix and Windows PowerShell on Windows. The extension removes the built-in `bash` tool from the active tool set and enables:
 
 - `exec_command` — run commands with optional PTY support and return a session ID when still running.
 - `write_stdin` — poll incremental output or write characters to a running session.
