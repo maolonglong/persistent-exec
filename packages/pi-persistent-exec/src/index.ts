@@ -44,14 +44,14 @@ const execParameters = Type.Object(
       Type.Integer({
         minimum: 250,
         maximum: 30_000,
-        description: "Maximum time to wait before returning a running session.",
+        description: "Maximum time to wait before returning a running session. Defaults to 10000.",
       }),
     ),
     max_output_tokens: Type.Optional(
       Type.Integer({
         minimum: 1,
         maximum: MAX_OUTPUT_TOKENS,
-        description: "Approximate output token budget for this response.",
+        description: "Approximate output token budget for this response. Defaults to 10000.",
       }),
     ),
   },
@@ -62,20 +62,24 @@ const stdinParameters = Type.Object(
   {
     session_id: Type.Integer({ minimum: 1, description: "Running session identifier." }),
     chars: Type.Optional(
-      Type.String({ description: "Characters to write. Empty or omitted polls without writing." }),
+      Type.String({
+        description:
+          "Characters to write. Empty or omitted polls without writing. Use \\u0003 for Ctrl-C.",
+      }),
     ),
     yield_time_ms: Type.Optional(
       Type.Integer({
         minimum: 250,
         maximum: MAX_POLL_YIELD_MS,
-        description: "Maximum time to wait for more output or process exit.",
+        description:
+          "Maximum time to wait for output or exit. Defaults to 250 after a write and 5000 when polling.",
       }),
     ),
     max_output_tokens: Type.Optional(
       Type.Integer({
         minimum: 1,
         maximum: MAX_OUTPUT_TOKENS,
-        description: "Approximate output token budget for this response.",
+        description: "Approximate output token budget for this response. Defaults to 10000.",
       }),
     ),
   },
@@ -89,13 +93,8 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
     name: EXEC_TOOL,
     label: "exec",
     description:
-      "Run a shell command. Commands that outlive the wait return a session_id for write_stdin.",
-    promptSnippet: "Run shell commands with persistent sessions and optional PTY interaction",
-    promptGuidelines: [
-      "Use exec_command instead of bash for shell commands.",
-      "Use tty=true only for interactive programs, REPLs, or terminal-dependent commands.",
-      "Use write_stdin with empty chars to poll a running exec_command session.",
-    ],
+      "Execute a shell command in workdir. Returns exit_code when complete or session_id when still running. Output keeps the tail within max_output_tokens and reports original_token_count when truncated.",
+    promptSnippet: "Execute shell commands with persistent sessions and optional PTY interaction",
     parameters: execParameters,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const activeRuntime = requireRuntime(runtime);
@@ -145,11 +144,8 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
     name: STDIN_TOOL,
     label: "stdin",
     description:
-      "Write characters to a running exec_command session, or poll it by omitting chars.",
-    promptSnippet: "Interact with or poll a running exec_command session",
-    promptGuidelines: [
-      "Use write_stdin only with a session_id returned by exec_command or write_stdin.",
-    ],
+      "Write characters to a running exec_command session, or omit chars to poll it. Returns exit_code when complete or session_id while still running. Output uses the same bounded tail as exec_command.",
+    promptSnippet: "Write to or poll a running exec_command session",
     parameters: stdinParameters,
     async execute(_toolCallId, params, signal, onUpdate) {
       const activeRuntime = requireRuntime(runtime);

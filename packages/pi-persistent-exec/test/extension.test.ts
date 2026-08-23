@@ -3,6 +3,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import persistentExecExtension from "../src/index";
 
 interface RegisteredTool {
+  description: string;
+  promptSnippet?: string;
+  promptGuidelines?: string[];
   execute(
     toolCallId: string,
     params: Record<string, unknown>,
@@ -38,6 +41,39 @@ function createHarness() {
     activeTools: () => activeTools,
   };
 }
+
+test("exposes concise agent-facing tool metadata", () => {
+  const { tools } = createHarness();
+  const exec = tools.get("exec_command");
+  const stdin = tools.get("write_stdin");
+  if (!exec || !stdin) throw new Error("persistent tools were not registered");
+
+  expect({
+    exec: {
+      description: exec.description,
+      promptSnippet: exec.promptSnippet,
+      promptGuidelines: exec.promptGuidelines,
+    },
+    stdin: {
+      description: stdin.description,
+      promptSnippet: stdin.promptSnippet,
+      promptGuidelines: stdin.promptGuidelines,
+    },
+  }).toEqual({
+    exec: {
+      description:
+        "Execute a shell command in workdir. Returns exit_code when complete or session_id when still running. Output keeps the tail within max_output_tokens and reports original_token_count when truncated.",
+      promptSnippet: "Execute shell commands with persistent sessions and optional PTY interaction",
+      promptGuidelines: undefined,
+    },
+    stdin: {
+      description:
+        "Write characters to a running exec_command session, or omit chars to poll it. Returns exit_code when complete or session_id while still running. Output uses the same bounded tail as exec_command.",
+      promptSnippet: "Write to or poll a running exec_command session",
+      promptGuidelines: undefined,
+    },
+  });
+});
 
 test("removes bash and runs a persistent stdin session", async () => {
   const harness = createHarness();
