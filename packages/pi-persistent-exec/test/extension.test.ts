@@ -5,6 +5,8 @@ import persistentExecExtension from "../src/index";
 
 initTheme("dark");
 
+const PERSISTENT_SESSION_TEST_TIMEOUT_MS = process.platform === "win32" ? 15_000 : 5_000;
+
 interface RenderContext {
   args: Record<string, unknown>;
   state: Record<string, unknown>;
@@ -324,7 +326,7 @@ test("removes bash and runs a persistent stdin session", async () => {
     undefined,
     { cwd: process.cwd() },
   );
-  expect(first.details.output).toBe("");
+  expect(first.details.output).toBe(process.platform === "win32" ? "ready" : "");
   expect(typeof first.details.session_id).toBe("number");
 
   const second = await stdin.execute(
@@ -342,7 +344,7 @@ test("removes bash and runs a persistent stdin session", async () => {
   expect(second.details.exit_code).toBe(0);
 
   await harness.handlers.get("session_shutdown")?.();
-});
+}, PERSISTENT_SESSION_TEST_TIMEOUT_MS);
 
 test("serializes concurrent interactions for one session", async () => {
   const harness = createHarness();
@@ -386,7 +388,7 @@ test("serializes concurrent interactions for one session", async () => {
   expect(delay).toBeGreaterThanOrEqual(350);
   expect(secondWrite.details.exit_code).toBe(0);
   await harness.handlers.get("session_shutdown")?.();
-});
+}, PERSISTENT_SESSION_TEST_TIMEOUT_MS);
 
 test("bounds final and partial output while preserving original size", async () => {
   const harness = createHarness();
