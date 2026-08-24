@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { truncateTail } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { keyHint, truncateTail } from "@earendil-works/pi-coding-agent";
+import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { loadSdk, type RuntimeApi } from "./sdk";
 
@@ -15,6 +15,8 @@ const MAX_WRITE_YIELD_MS = 30_000;
 const MAX_POLL_YIELD_MS = 300_000;
 const DEFAULT_OUTPUT_TOKENS = 10_000;
 const MAX_OUTPUT_TOKENS = 12_500;
+const OUTPUT_PREVIEW_LINES = 5;
+const INPUT_PREVIEW_CHARS = 80;
 
 interface ToolOutput {
   wall_time_seconds: number;
@@ -30,6 +32,28 @@ interface WaitResult {
   originalBytes: number;
   truncated: boolean;
 }
+
+interface RenderState {
+  startedAt?: number;
+  endedAt?: number;
+  interval?: NodeJS.Timeout;
+}
+
+type ToolTheme = {
+  bold(text: string): string;
+  fg(
+    color:
+      | "toolTitle"
+      | "accent"
+      | "toolOutput"
+      | "warning"
+      | "success"
+      | "error"
+      | "muted"
+      | "dim",
+    text: string,
+  ): string;
+};
 
 const execParameters = Type.Object(
   {
@@ -105,6 +129,10 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
         tty: params.tty ?? false,
       });
       const startedAt = performance.now();
+      onUpdate?.({
+        content: [],
+        details: { session_id: sessionId, output: "" },
+      });
       let waited: WaitResult;
       try {
         waited = await waitForSession(
@@ -128,16 +156,21 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
 
       return toolResult(waited, sessionId, startedAt);
     },
-    renderCall(args, theme) {
-      const command = args.cmd.length > 100 ? `${args.cmd.slice(0, 97)}...` : args.cmd;
-      return new Text(
-        `${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", command)}`,
-        0,
-        0,
+    renderCall(args, theme, context) {
+      startRenderTimer(context.state as RenderState, context.executionStarted);
+      const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+      text.setText(
+        `${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", args.cmd || "...")}`,
       );
+      return text;
     },
-    renderResult(result, { isPartial }, theme) {
-      return renderToolResult(result.details as Partial<ToolOutput> | undefined, isPartial, theme);
+    renderResult(result, options, theme, context) {
+      updateRenderTimer(context.state as RenderState, options.isPartial, context.isError, context);
+      const component =
+        (context.lastComponent as ToolResultRenderComponent | undefined) ??
+        new ToolResultRenderComponent();
+      component.update(result, options, context.state as RenderState, theme, context.isError);
+      return component;
     },
   });
 
@@ -158,6 +191,10 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
         const defaultYield = chars === "" ? DEFAULT_POLL_YIELD_MS : DEFAULT_WRITE_YIELD_MS;
         const yieldMs = Math.min(params.yield_time_ms ?? defaultYield, maxYield);
         const startedAt = performance.now();
+        onUpdate?.({
+          content: [],
+          details: { session_id: params.session_id, output: "" },
+        });
         const waited = await waitForSession(
           activeRuntime,
           params.session_id,
@@ -175,16 +212,26 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
         return toolResult(waited, params.session_id, startedAt);
       });
     },
-    renderCall(args, theme) {
-      const action = args.chars ? `write ${JSON.stringify(args.chars)}` : "poll";
-      return new Text(
-        `${theme.fg("toolTitle", theme.bold("stdin"))} ${theme.fg("dim", `${args.session_id}: ${action}`)}`,
-        0,
-        0,
+    renderCall(args, theme, context) {
+      const state = context.state as RenderState;
+      startRenderTimer(state, context.executionStarted);
+      const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+      const label = args.chars
+        ? `Wrote to session ${args.session_id}`
+        : `${state.endedAt === undefined ? "Waiting" : "Waited"} for session ${args.session_id}`;
+      const input = args.chars ? ` · ${previewInput(args.chars)}` : "";
+      text.setText(
+        `${theme.fg("toolTitle", theme.bold(args.chars ? "↳" : "•"))} ${theme.fg("dim", `${label}${input}`)}`,
       );
+      return text;
     },
-    renderResult(result, { isPartial }, theme) {
-      return renderToolResult(result.details as Partial<ToolOutput> | undefined, isPartial, theme);
+    renderResult(result, options, theme, context) {
+      updateRenderTimer(context.state as RenderState, options.isPartial, context.isError, context);
+      const component =
+        (context.lastComponent as ToolResultRenderComponent | undefined) ??
+        new ToolResultRenderComponent();
+      component.update(result, options, context.state as RenderState, theme, context.isError);
+      return component;
     },
   });
 
@@ -333,20 +380,130 @@ function formatOutput(output: string, originalBytes: number, truncated: boolean)
   return `${output}\n\n[Output truncated from approximately ${originalTokenCount} tokens.]`;
 }
 
-function renderToolResult(
+function startRenderTimer(state: RenderState, executionStarted: boolean): void {
+  if (executionStarted && state.startedAt === undefined) {
+    state.startedAt = Date.now();
+    state.endedAt = undefined;
+  }
+}
+
+function updateRenderTimer(
+  state: RenderState,
+  isPartial: boolean,
+  isError: boolean,
+  context: { invalidate(): void },
+): void {
+  if (state.startedAt !== undefined && isPartial && !state.interval) {
+    state.interval = setInterval(() => context.invalidate(), 1_000);
+  }
+  if (!isPartial || isError) {
+    state.endedAt ??= Date.now();
+    if (state.interval) {
+      clearInterval(state.interval);
+      state.interval = undefined;
+    }
+  }
+}
+
+function previewInput(input: string): string {
+  const escaped = JSON.stringify(input);
+  if ([...escaped].length <= INPUT_PREVIEW_CHARS) return escaped;
+  return `${[...escaped].slice(0, INPUT_PREVIEW_CHARS - 4).join("")}..."`;
+}
+
+function splitOutputNotice(output: string): { output: string; notice?: string } {
+  const match = output.match(/\n\n\[Output truncated from approximately (\d+) tokens\.\]$/);
+  if (!match || match.index === undefined) return { output };
+  return {
+    output: output.slice(0, match.index),
+    notice: `Output truncated from approximately ${match[1]} tokens`,
+  };
+}
+
+function textContent(result: { content: Array<{ type: string; text?: string }> }): string {
+  return result.content
+    .filter((item): item is { type: string; text: string } => typeof item.text === "string")
+    .map((item) => item.text)
+    .join("\n");
+}
+
+class ToolResultRenderComponent extends Container {
+  update(
+    result: { content: Array<{ type: string; text?: string }>; details?: unknown },
+    options: { expanded: boolean; isPartial: boolean },
+    state: RenderState,
+    theme: ToolTheme,
+    isError: boolean,
+  ): void {
+    this.clear();
+    const details = result.details as Partial<ToolOutput> | undefined;
+    const rawOutput = details?.output ?? (isError ? textContent(result) : "");
+    const rendered = splitOutputNotice(rawOutput);
+    const output = rendered.output.trimEnd();
+
+    if (output) {
+      const styledOutput = output
+        .split("\n")
+        .map((line) => theme.fg("toolOutput", line))
+        .join("\n");
+      if (options.expanded) {
+        this.addChild(new Text(`\n${styledOutput}`, 0, 0));
+      } else {
+        this.addChild({
+          render(width: number) {
+            const visualLines = new Text(styledOutput, 0, 0).render(width);
+            const preview = visualLines.slice(-OUTPUT_PREVIEW_LINES);
+            const skipped = visualLines.length - preview.length;
+            if (skipped <= 0) return ["", ...preview];
+            const hint =
+              theme.fg("muted", `... (${skipped} earlier lines,`) +
+              ` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+            return ["", truncateToWidth(hint, width, "..."), ...preview];
+          },
+          invalidate() {},
+        });
+      }
+    } else if (!options.isPartial && !isError) {
+      this.addChild(new Text(`\n${theme.fg("muted", "(no output)")}`, 0, 0));
+    }
+
+    if (rendered.notice) {
+      this.addChild(new Text(`\n${theme.fg("warning", `[${rendered.notice}]`)}`, 0, 0));
+    }
+
+    this.addChild(
+      new Text(`\n${formatRenderStatus(details, options.isPartial, state, theme, isError)}`, 0, 0),
+    );
+  }
+}
+
+function formatRenderStatus(
   details: Partial<ToolOutput> | undefined,
   isPartial: boolean,
-  theme: { fg(color: "warning" | "success" | "dim" | "error", text: string): string },
-): Text {
-  if (isPartial) return new Text(theme.fg("warning", "running"), 0, 0);
-  if (!details) return new Text(theme.fg("error", "no result"), 0, 0);
+  state: RenderState,
+  theme: ToolTheme,
+  isError: boolean,
+): string {
+  const renderedElapsedSeconds =
+    state.startedAt === undefined
+      ? undefined
+      : ((state.endedAt ?? Date.now()) - state.startedAt) / 1_000;
+  const elapsedSeconds = renderedElapsedSeconds ?? details?.wall_time_seconds ?? 0;
+  const duration = `${elapsedSeconds.toFixed(1)}s`;
+  const countableOutput = details?.output ? splitOutputNotice(details.output).output.trimEnd() : "";
+  const lines = countableOutput ? countableOutput.split("\n").length : 0;
+  const lineCount = `${lines} ${lines === 1 ? "line" : "lines"}`;
 
-  const state =
-    details.exit_code === undefined ? `session ${details.session_id}` : `exit ${details.exit_code}`;
-  const lines = details.output?.split("\n").filter(Boolean).length ?? 0;
-  return new Text(
-    `${theme.fg(details.exit_code === 0 || details.exit_code === undefined ? "success" : "error", state)}${theme.fg("dim", ` · ${lines} lines · ${details.wall_time_seconds ?? 0}s`)}`,
-    0,
-    0,
-  );
+  if (isPartial) {
+    const session = details?.session_id === undefined ? "" : ` · session ${details.session_id}`;
+    return `${theme.fg("warning", "Running")}${theme.fg("dim", `${session} · elapsed ${duration}`)}`;
+  }
+  if (isError || !details) {
+    return `${theme.fg("error", "Failed")}${theme.fg("dim", ` · took ${duration}`)}`;
+  }
+  if (details.exit_code === undefined) {
+    return `${theme.fg("success", `Session ${details.session_id} running`)}${theme.fg("dim", ` · ${lineCount} · waited ${duration}`)}`;
+  }
+  const color = details.exit_code === 0 ? "success" : "error";
+  return `${theme.fg(color, `Exit ${details.exit_code}`)}${theme.fg("dim", ` · ${lineCount} · took ${duration}`)}`;
 }

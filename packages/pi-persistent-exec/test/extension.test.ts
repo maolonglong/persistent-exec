@@ -1,6 +1,23 @@
 import { expect, test } from "bun:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, initTheme } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
 import persistentExecExtension from "../src/index";
+
+initTheme("dark");
+
+interface RenderContext {
+  args: Record<string, unknown>;
+  state: Record<string, unknown>;
+  lastComponent?: Component;
+  invalidate(): void;
+  executionStarted: boolean;
+  isError: boolean;
+}
+
+interface TestTheme {
+  bold(text: string): string;
+  fg(color: string, text: string): string;
+}
 
 interface RegisteredTool {
   description: string;
@@ -13,6 +30,31 @@ interface RegisteredTool {
     onUpdate: ((update: { content: Array<{ type: string; text: string }> }) => void) | undefined,
     context: { cwd: string },
   ): Promise<{ content: Array<{ type: string; text: string }>; details: Record<string, unknown> }>;
+  renderCall?(args: Record<string, any>, theme: TestTheme, context: RenderContext): Component;
+  renderResult?(
+    result: { content: Array<{ type: string; text: string }>; details?: Record<string, unknown> },
+    options: { expanded: boolean; isPartial: boolean },
+    theme: TestTheme,
+    context: RenderContext,
+  ): Component;
+}
+
+const plainTheme: TestTheme = {
+  bold: (text) => text,
+  fg: (_color, text) => text,
+};
+
+function renderContext(
+  args: Record<string, unknown>,
+  state: Record<string, unknown> = {},
+): RenderContext {
+  return {
+    args,
+    state,
+    invalidate() {},
+    executionStarted: true,
+    isError: false,
+  };
 }
 
 function createHarness() {
@@ -73,6 +115,129 @@ test("exposes concise agent-facing tool metadata", () => {
       promptGuidelines: undefined,
     },
   });
+});
+
+test("renders a compact output tail and full expanded output", () => {
+  const exec = createHarness().tools.get("exec_command");
+  if (!exec?.renderResult) throw new Error("exec renderer was not registered");
+  const result = {
+    content: [{ type: "text", text: "ignored" }],
+    details: {
+      output: Array.from({ length: 8 }, (_, index) => `line ${index + 1}`).join("\n"),
+      exit_code: 0,
+      wall_time_seconds: 1.25,
+    },
+  };
+  const context = renderContext({ cmd: "printf output" });
+
+  const collapsed = exec.renderResult(
+    result,
+    { expanded: false, isPartial: false },
+    plainTheme,
+    context,
+  );
+  const collapsedText = collapsed.render(80).join("\n");
+  expect(collapsedText).toContain("3 earlier lines");
+  expect(collapsedText).not.toContain("line 1");
+  expect(collapsedText).toContain("line 8");
+  expect(collapsedText).toContain("Exit 0 · 8 lines · took 1.3s");
+
+  context.lastComponent = collapsed;
+  const expanded = exec.renderResult(
+    result,
+    { expanded: true, isPartial: false },
+    plainTheme,
+    context,
+  );
+  expect(expanded.render(80).join("\n")).toContain("line 1");
+});
+
+test("renders live and persistent session states", () => {
+  const exec = createHarness().tools.get("exec_command");
+  if (!exec?.renderCall || !exec.renderResult)
+    throw new Error("exec renderers were not registered");
+  const state: Record<string, unknown> = {};
+  const callContext = renderContext({ cmd: "sleep 30" }, state);
+  exec.renderCall({ cmd: "sleep 30" }, plainTheme, callContext);
+  const resultContext = renderContext({ cmd: "sleep 30" }, state);
+
+  const partial = exec.renderResult(
+    {
+      content: [],
+      details: { output: "ready", session_id: 42 },
+    },
+    { expanded: false, isPartial: true },
+    plainTheme,
+    resultContext,
+  );
+  expect(partial.render(80).join("\n")).toContain("Running · session 42 · elapsed");
+
+  resultContext.lastComponent = partial;
+  state.startedAt = 1_000;
+  state.endedAt = 6_000;
+  const waiting = exec.renderResult(
+    {
+      content: [{ type: "text", text: "ignored" }],
+      details: { output: "ready", session_id: 42, wall_time_seconds: 0.25 },
+    },
+    { expanded: false, isPartial: false },
+    plainTheme,
+    resultContext,
+  );
+  expect(waiting.render(80).join("\n")).toContain("Session 42 running · 1 line · waited 5.0s");
+  expect(state.interval).toBeUndefined();
+});
+
+test("renders semantic stdin actions with bounded escaped input", () => {
+  const stdin = createHarness().tools.get("write_stdin");
+  if (!stdin?.renderCall || !stdin.renderResult)
+    throw new Error("stdin renderers were not registered");
+  const chars = `${"x".repeat(100)}\n`;
+  const writeContext = renderContext({ session_id: 7, chars });
+  const write = stdin.renderCall({ session_id: 7, chars }, plainTheme, writeContext);
+  const writeText = write.render(200).join("\n");
+  expect(writeText).toContain('Wrote to session 7 · "xxx');
+  expect(writeText.trimEnd()).toEndWith('..."');
+  expect(writeText).not.toContain("\n");
+
+  const state: Record<string, unknown> = {};
+  const pollContext = renderContext({ session_id: 7 }, state);
+  const poll = stdin.renderCall({ session_id: 7 }, plainTheme, pollContext);
+  expect(poll.render(80).join("\n")).toContain("Waiting for session 7");
+  stdin.renderResult(
+    {
+      content: [{ type: "text", text: "ignored" }],
+      details: { output: "", exit_code: 0, wall_time_seconds: 0.5 },
+    },
+    { expanded: false, isPartial: false },
+    plainTheme,
+    renderContext({ session_id: 7 }, state),
+  );
+  pollContext.lastComponent = poll;
+  const waited = stdin.renderCall({ session_id: 7 }, plainTheme, pollContext);
+  expect(waited.render(80).join("\n")).toContain("Waited for session 7");
+});
+
+test("renders failures and truncation metadata", () => {
+  const exec = createHarness().tools.get("exec_command");
+  if (!exec?.renderResult) throw new Error("exec renderer was not registered");
+  const component = exec.renderResult(
+    {
+      content: [{ type: "text", text: "ignored" }],
+      details: {
+        output: "tail\n\n[Output truncated from approximately 1234 tokens.]",
+        exit_code: 2,
+        wall_time_seconds: 0.25,
+        original_token_count: 1234,
+      },
+    },
+    { expanded: false, isPartial: false },
+    plainTheme,
+    renderContext({ cmd: "false" }),
+  );
+  const rendered = component.render(100).join("\n");
+  expect(rendered.match(/Output truncated/g)).toHaveLength(1);
+  expect(rendered).toContain("Exit 2 · 1 line · took 0.3s");
 });
 
 test("removes bash and runs a persistent stdin session", async () => {
