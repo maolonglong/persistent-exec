@@ -67,7 +67,7 @@ jobs:
           node-version: 24.19.0
       - name: Build native library
         shell: bash
-        run: ${{ matrix.builder }} build --release -p persistent-exec-ffi --target ${{ matrix.target }}
+        run: ${{ matrix.builder }} build --release --locked -p persistent-exec-ffi --target ${{ matrix.target }}
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
       - run: node scripts/stage-native.mjs ${{ matrix.target }} ${{ matrix.package }}

@@ -5,13 +5,14 @@ fmt:
 	npx oxfmt packages
 
 lint:
-	cargo clippy --workspace --all-targets -- -D warnings
+	CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets --all-features --locked
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 	npm run build
 	npm run typecheck
 
 test:
-	cargo test --workspace
-	cargo build -p persistent-exec-ffi
+	cargo test --workspace --all-features --locked
+	cargo build -p persistent-exec-ffi --locked
 	npm test
 
 test-node:
@@ -24,5 +25,5 @@ test-pi:
 	bun test packages/pi-persistent-exec/test
 
 build-release:
-	cargo build --release -p persistent-exec-ffi
+	cargo build --release -p persistent-exec-ffi --locked
 	npm run build
