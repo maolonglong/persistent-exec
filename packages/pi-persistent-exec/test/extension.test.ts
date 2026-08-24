@@ -306,89 +306,97 @@ test("renders failures and truncation metadata", () => {
   expect(rendered).toContain("Exit 2 · 1 line · took 0.3s");
 });
 
-test("removes bash and runs a persistent stdin session", async () => {
-  const harness = createHarness();
-  await harness.handlers.get("session_start")?.();
+test(
+  "removes bash and runs a persistent stdin session",
+  async () => {
+    const harness = createHarness();
+    await harness.handlers.get("session_start")?.();
 
-  expect(harness.activeTools()).toEqual(["read", "write", "exec_command", "write_stdin"]);
+    expect(harness.activeTools()).toEqual(["read", "write", "exec_command", "write_stdin"]);
 
-  const exec = harness.tools.get("exec_command");
-  const stdin = harness.tools.get("write_stdin");
-  if (!exec || !stdin) throw new Error("persistent tools were not registered");
+    const exec = harness.tools.get("exec_command");
+    const stdin = harness.tools.get("write_stdin");
+    if (!exec || !stdin) throw new Error("persistent tools were not registered");
 
-  const first = await exec.execute(
-    "call-1",
-    {
-      cmd: "node -e \"setTimeout(()=>{process.stdout.write('ready');process.stdin.once('data',d=>{process.stdout.write('received:'+d.toString().trim());process.stdin.destroy()})},300)\"",
-      yield_time_ms: 250,
-    },
-    undefined,
-    undefined,
-    { cwd: process.cwd() },
-  );
-  expect(first.details.output).toBe(process.platform === "win32" ? "ready" : "");
-  expect(typeof first.details.session_id).toBe("number");
-
-  const second = await stdin.execute(
-    "call-2",
-    {
-      session_id: first.details.session_id,
-      chars: "hello\n",
-      yield_time_ms: 1_000,
-    },
-    undefined,
-    undefined,
-    { cwd: process.cwd() },
-  );
-  expect(`${first.details.output}${second.details.output}`).toBe("readyreceived:hello");
-  expect(second.details.exit_code).toBe(0);
-
-  await harness.handlers.get("session_shutdown")?.();
-}, PERSISTENT_SESSION_TEST_TIMEOUT_MS);
-
-test("serializes concurrent interactions for one session", async () => {
-  const harness = createHarness();
-  await harness.handlers.get("session_start")?.();
-  const exec = harness.tools.get("exec_command");
-  const stdin = harness.tools.get("write_stdin");
-  if (!exec || !stdin) throw new Error("persistent tools were not registered");
-
-  const script =
-    'let buffer="",firstAt=0;process.stdout.write("ready");process.stdin.on("data",data=>{buffer+=data;while(buffer.includes("\\n")){const newline=buffer.indexOf("\\n");buffer=buffer.slice(newline+1);if(firstAt===0){firstAt=Date.now();process.stdout.write("first\\n")}else{process.stdout.write("delay:"+(Date.now()-firstAt)+"\\n");process.exit(0)}}})';
-  const encodedScript = Buffer.from(script).toString("base64");
-  const command = `node -e "eval(Buffer.from('${encodedScript}','base64').toString())"`;
-  const first = await exec.execute(
-    "call-start",
-    { cmd: command, yield_time_ms: 250 },
-    undefined,
-    undefined,
-    { cwd: process.cwd() },
-  );
-  const sessionId = Number(first.details.session_id);
-
-  const [firstWrite, secondWrite] = await Promise.all([
-    stdin.execute(
-      "call-first-write",
-      { session_id: sessionId, chars: "one\n", yield_time_ms: 500 },
+    const first = await exec.execute(
+      "call-1",
+      {
+        cmd: "node -e \"setTimeout(()=>{process.stdout.write('ready');process.stdin.once('data',d=>{process.stdout.write('received:'+d.toString().trim());process.stdin.destroy()})},300)\"",
+        yield_time_ms: 250,
+      },
       undefined,
       undefined,
       { cwd: process.cwd() },
-    ),
-    stdin.execute(
-      "call-second-write",
-      { session_id: sessionId, chars: "two\n", yield_time_ms: 1_000 },
+    );
+    expect(first.details.output).toBe(process.platform === "win32" ? "ready" : "");
+    expect(typeof first.details.session_id).toBe("number");
+
+    const second = await stdin.execute(
+      "call-2",
+      {
+        session_id: first.details.session_id,
+        chars: "hello\n",
+        yield_time_ms: 1_000,
+      },
       undefined,
       undefined,
       { cwd: process.cwd() },
-    ),
-  ]);
+    );
+    expect(`${first.details.output}${second.details.output}`).toBe("readyreceived:hello");
+    expect(second.details.exit_code).toBe(0);
 
-  expect(firstWrite.details.output).toContain("first");
-  const delay = Number(String(secondWrite.details.output).match(/delay:(\d+)/)?.[1]);
-  expect(delay).toBeGreaterThanOrEqual(350);
-  expect(secondWrite.details.exit_code).toBe(0);
-  await harness.handlers.get("session_shutdown")?.();
-}, PERSISTENT_SESSION_TEST_TIMEOUT_MS);
+    await harness.handlers.get("session_shutdown")?.();
+  },
+  PERSISTENT_SESSION_TEST_TIMEOUT_MS,
+);
+
+test(
+  "serializes concurrent interactions for one session",
+  async () => {
+    const harness = createHarness();
+    await harness.handlers.get("session_start")?.();
+    const exec = harness.tools.get("exec_command");
+    const stdin = harness.tools.get("write_stdin");
+    if (!exec || !stdin) throw new Error("persistent tools were not registered");
+
+    const script =
+      'let buffer="",firstAt=0;process.stdout.write("ready");process.stdin.on("data",data=>{buffer+=data;while(buffer.includes("\\n")){const newline=buffer.indexOf("\\n");buffer=buffer.slice(newline+1);if(firstAt===0){firstAt=Date.now();process.stdout.write("first\\n")}else{process.stdout.write("delay:"+(Date.now()-firstAt)+"\\n");process.exit(0)}}})';
+    const encodedScript = Buffer.from(script).toString("base64");
+    const command = `node -e "eval(Buffer.from('${encodedScript}','base64').toString())"`;
+    const first = await exec.execute(
+      "call-start",
+      { cmd: command, yield_time_ms: 250 },
+      undefined,
+      undefined,
+      { cwd: process.cwd() },
+    );
+    const sessionId = Number(first.details.session_id);
+
+    const [firstWrite, secondWrite] = await Promise.all([
+      stdin.execute(
+        "call-first-write",
+        { session_id: sessionId, chars: "one\n", yield_time_ms: 500 },
+        undefined,
+        undefined,
+        { cwd: process.cwd() },
+      ),
+      stdin.execute(
+        "call-second-write",
+        { session_id: sessionId, chars: "two\n", yield_time_ms: 1_000 },
+        undefined,
+        undefined,
+        { cwd: process.cwd() },
+      ),
+    ]);
+
+    expect(firstWrite.details.output).toContain("first");
+    const delay = Number(String(secondWrite.details.output).match(/delay:(\d+)/)?.[1]);
+    expect(delay).toBeGreaterThanOrEqual(350);
+    expect(secondWrite.details.exit_code).toBe(0);
+    await harness.handlers.get("session_shutdown")?.();
+  },
+  PERSISTENT_SESSION_TEST_TIMEOUT_MS,
+);
 
 test("bounds final and partial output while preserving original size", async () => {
   const harness = createHarness();
