@@ -253,14 +253,14 @@ test("removes bash and runs a persistent stdin session", async () => {
   const first = await exec.execute(
     "call-1",
     {
-      cmd: "node -e \"process.stdout.write('ready');process.stdin.once('data',d=>{process.stdout.write('received:'+d.toString().trim());process.stdin.destroy()})\"",
+      cmd: "node -e \"setTimeout(()=>{process.stdout.write('ready');process.stdin.once('data',d=>{process.stdout.write('received:'+d.toString().trim());process.stdin.destroy()})},300)\"",
       yield_time_ms: 250,
     },
     undefined,
     undefined,
     { cwd: process.cwd() },
   );
-  expect(first.details.output).toBe("ready");
+  expect(first.details.output).toBe("");
   expect(typeof first.details.session_id).toBe("number");
 
   const second = await stdin.execute(
@@ -274,10 +274,8 @@ test("removes bash and runs a persistent stdin session", async () => {
     undefined,
     { cwd: process.cwd() },
   );
-  expect(second.details).toMatchObject({
-    output: "received:hello",
-    exit_code: 0,
-  });
+  expect(`${first.details.output}${second.details.output}`).toBe("readyreceived:hello");
+  expect(second.details.exit_code).toBe(0);
 
   await harness.handlers.get("session_shutdown")?.();
 });
