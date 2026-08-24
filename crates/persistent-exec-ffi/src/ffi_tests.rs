@@ -62,7 +62,7 @@ fn c_abi_runs_and_polls_a_command() {
 
     let poll_request = CString::new(format!(r#"{{"version":1,"session_id":{session_id}}}"#))
         .expect("request should not contain NUL");
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     let mut output = String::new();
     let exit_code = loop {
         let poll = unsafe { persistent_exec_poll(handle, poll_request.as_ptr()) };

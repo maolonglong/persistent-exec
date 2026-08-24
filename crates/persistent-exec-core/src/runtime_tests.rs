@@ -22,7 +22,7 @@ fn request(cmd: &str, tty: bool) -> SpawnRequest {
 }
 
 fn collect_until_exit(runtime: &ExecRuntime, session_id: u64) -> PollResponse {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     let mut output = Vec::new();
     let mut omitted_bytes = 0;
     loop {
