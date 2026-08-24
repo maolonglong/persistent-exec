@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { keyHint, truncateTail } from "@earendil-works/pi-coding-agent";
+import { keyHint, truncateTail, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { loadSdk, type RuntimeApi } from "./sdk";
@@ -476,6 +476,11 @@ function textContent(result: { content: Array<{ type: string; text?: string }> }
 }
 
 class ToolResultRenderComponent extends Container {
+  private cachedOutput: string | undefined;
+  private cachedWidth: number | undefined;
+  private cachedLines: string[] | undefined;
+  private cachedSkipped: number | undefined;
+
   update(
     result: { content: Array<{ type: string; text?: string }>; details?: unknown },
     options: { expanded: boolean; isPartial: boolean },
@@ -498,17 +503,26 @@ class ToolResultRenderComponent extends Container {
         this.addChild(new Text(`\n${styledOutput}`, 0, 0));
       } else {
         this.addChild({
-          render(width: number) {
-            const visualLines = new Text(styledOutput, 0, 0).render(width);
-            const preview = visualLines.slice(-OUTPUT_PREVIEW_LINES);
-            const skipped = visualLines.length - preview.length;
-            if (skipped <= 0) return ["", ...preview];
+          render: (width: number) => {
+            if (this.cachedOutput !== styledOutput || this.cachedWidth !== width) {
+              const preview = truncateToVisualLines(styledOutput, OUTPUT_PREVIEW_LINES, width);
+              this.cachedOutput = styledOutput;
+              this.cachedWidth = width;
+              this.cachedLines = preview.visualLines;
+              this.cachedSkipped = preview.skippedCount;
+            }
+            if (!this.cachedSkipped) return ["", ...(this.cachedLines ?? [])];
             const hint =
-              theme.fg("muted", `... (${skipped} earlier lines,`) +
+              theme.fg("muted", `... (${this.cachedSkipped} earlier lines,`) +
               ` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
-            return ["", truncateToWidth(hint, width, "..."), ...preview];
+            return ["", truncateToWidth(hint, width, "..."), ...(this.cachedLines ?? [])];
           },
-          invalidate() {},
+          invalidate: () => {
+            this.cachedOutput = undefined;
+            this.cachedWidth = undefined;
+            this.cachedLines = undefined;
+            this.cachedSkipped = undefined;
+          },
         });
       }
     } else if (!options.isPartial && !isError) {
