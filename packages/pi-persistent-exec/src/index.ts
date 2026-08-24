@@ -11,6 +11,9 @@ const POLL_INTERVAL_MS = 25;
 const DEFAULT_EXEC_YIELD_MS = 10_000;
 const DEFAULT_WRITE_YIELD_MS = 250;
 const DEFAULT_POLL_YIELD_MS = 5_000;
+const MIN_YIELD_MS = 250;
+const MIN_WINDOWS_EXEC_YIELD_MS = 10_000;
+const MIN_POLL_YIELD_MS = 5_000;
 const MAX_WRITE_YIELD_MS = 30_000;
 const MAX_POLL_YIELD_MS = 300_000;
 const DEFAULT_OUTPUT_TOKENS = 10_000;
@@ -59,23 +62,25 @@ const execParameters = Type.Object(
   {
     cmd: Type.String({ description: "Shell command to execute." }),
     workdir: Type.Optional(
-      Type.String({ description: "Working directory. Defaults to the current project directory." }),
+      Type.String({ description: "Working directory for the command. Defaults to the turn cwd." }),
     ),
     tty: Type.Optional(
-      Type.Boolean({ description: "Allocate a PTY for interactive commands. Defaults to false." }),
+      Type.Boolean({
+        description: "True allocates a PTY for the command; false or omitted uses plain pipes.",
+      }),
     ),
     yield_time_ms: Type.Optional(
-      Type.Integer({
-        minimum: 250,
-        maximum: 30_000,
-        description: "Maximum time to wait before returning a running session. Defaults to 10000.",
+      Type.Number({
+        description:
+          process.platform === "win32"
+            ? "Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms."
+            : "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms.",
       }),
     ),
     max_output_tokens: Type.Optional(
-      Type.Integer({
-        minimum: 1,
-        maximum: MAX_OUTPUT_TOKENS,
-        description: "Approximate output token budget for this response. Defaults to 10000.",
+      Type.Number({
+        description:
+          "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy.",
       }),
     ),
   },
@@ -84,26 +89,24 @@ const execParameters = Type.Object(
 
 const stdinParameters = Type.Object(
   {
-    session_id: Type.Integer({ minimum: 1, description: "Running session identifier." }),
+    session_id: Type.Number({
+      description: "Identifier of the running unified exec session.",
+    }),
     chars: Type.Optional(
       Type.String({
-        description:
-          "Characters to write. Empty or omitted polls without writing. Use \\u0003 for Ctrl-C.",
+        description: "Bytes to write to stdin. Defaults to empty, which polls without writing.",
       }),
     ),
     yield_time_ms: Type.Optional(
-      Type.Integer({
-        minimum: 250,
-        maximum: MAX_POLL_YIELD_MS,
+      Type.Number({
         description:
-          "Wait before returning output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls default to 5000 ms and may wait up to 300000 ms.",
+          "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default.",
       }),
     ),
     max_output_tokens: Type.Optional(
-      Type.Integer({
-        minimum: 1,
-        maximum: MAX_OUTPUT_TOKENS,
-        description: "Approximate output token budget for this response. Defaults to 10000.",
+      Type.Number({
+        description:
+          "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy.",
       }),
     ),
   },
@@ -118,11 +121,19 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
     name: EXEC_TOOL,
     label: "exec",
     description:
-      "Execute a shell command in workdir. Returns exit_code when complete or session_id when still running. Output keeps the tail within max_output_tokens and reports original_token_count when truncated.",
+      process.platform === "win32"
+        ? `Runs a command in a PTY, returning output or a session ID for ongoing interaction.\n\n${windowsShellGuidance()}`
+        : "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
     promptSnippet: "Execute shell commands with persistent sessions and optional PTY interaction",
     parameters: execParameters,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const activeRuntime = requireRuntime(runtime);
+      const yieldMs = clampExecYield(
+        optionalUnsignedInteger(params.yield_time_ms, "yield_time_ms") ?? DEFAULT_EXEC_YIELD_MS,
+      );
+      const maxOutputTokens =
+        optionalUnsignedInteger(params.max_output_tokens, "max_output_tokens") ??
+        DEFAULT_OUTPUT_TOKENS;
       const sessionId = activeRuntime.spawn({
         cmd: params.cmd,
         workdir: resolve(ctx.cwd, params.workdir ?? "."),
@@ -138,8 +149,8 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
         waited = await waitForSession(
           activeRuntime,
           sessionId,
-          params.yield_time_ms ?? DEFAULT_EXEC_YIELD_MS,
-          params.max_output_tokens ?? DEFAULT_OUTPUT_TOKENS,
+          yieldMs,
+          maxOutputTokens,
           signal,
           (output) => {
             onUpdate?.({
@@ -177,39 +188,43 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: STDIN_TOOL,
     label: "stdin",
-    description:
-      "Write characters to a running exec_command session, or omit chars to poll it. Returns exit_code when complete or session_id while still running. Output uses the same bounded tail as exec_command.",
+    description: "Writes characters to an existing unified exec session and returns recent output.",
     promptSnippet: "Write to or poll a running exec_command session",
     parameters: stdinParameters,
     async execute(_toolCallId, params, signal, onUpdate) {
       return withSessionLock(sessionInteractions, params.session_id, signal, async () => {
         const activeRuntime = requireRuntime(runtime);
+        const sessionId = positiveInteger(params.session_id, "session_id");
         const chars = params.chars ?? "";
-        if (chars !== "") activeRuntime.write(params.session_id, chars);
+        if (chars !== "") activeRuntime.write(sessionId, chars);
 
-        const maxYield = chars === "" ? MAX_POLL_YIELD_MS : MAX_WRITE_YIELD_MS;
         const defaultYield = chars === "" ? DEFAULT_POLL_YIELD_MS : DEFAULT_WRITE_YIELD_MS;
-        const yieldMs = Math.min(params.yield_time_ms ?? defaultYield, maxYield);
+        const requestedYield =
+          optionalUnsignedInteger(params.yield_time_ms, "yield_time_ms") ?? defaultYield;
+        const yieldMs = clampWriteYield(requestedYield, chars === "");
+        const maxOutputTokens =
+          optionalUnsignedInteger(params.max_output_tokens, "max_output_tokens") ??
+          DEFAULT_OUTPUT_TOKENS;
         const startedAt = performance.now();
         onUpdate?.({
           content: [],
-          details: { session_id: params.session_id, output: "" },
+          details: { session_id: sessionId, output: "" },
         });
         const waited = await waitForSession(
           activeRuntime,
-          params.session_id,
+          sessionId,
           yieldMs,
-          params.max_output_tokens ?? DEFAULT_OUTPUT_TOKENS,
+          maxOutputTokens,
           signal,
           (output) => {
             onUpdate?.({
               content: [{ type: "text", text: output }],
-              details: { session_id: params.session_id, output },
+              details: { session_id: sessionId, output },
             });
           },
         );
 
-        return toolResult(waited, params.session_id, startedAt);
+        return toolResult(waited, sessionId, startedAt);
       });
     },
     renderCall(args, theme, context) {
@@ -249,6 +264,39 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
     runtime = null;
     sessionInteractions.clear();
   });
+}
+
+function windowsShellGuidance(): string {
+  return `Windows safety rules:
+- Do not compose destructive filesystem commands across shells. Do not enumerate paths in PowerShell and then pass them to \`cmd /c\`, batch builtins, or another shell for deletion or moving. Use one shell end-to-end, prefer native PowerShell cmdlets such as \`Remove-Item\` / \`Move-Item\` with \`-LiteralPath\`, and avoid string-built shell commands for file operations.
+- Before any recursive delete or move on Windows, verify the resolved absolute target paths stay within the intended workspace or explicitly named target directory. Never issue a recursive delete or move against a computed path if the final target has not been checked.
+- When using \`Start-Process\` to launch a background helper or service, pass \`-WindowStyle Hidden\` unless the user explicitly asked for a visible interactive window. Use visible windows only for interactive tools the user needs to see or control.`;
+}
+
+function optionalUnsignedInteger(value: number | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function clampExecYield(yieldMs: number): number {
+  const minimum = process.platform === "win32" ? MIN_WINDOWS_EXEC_YIELD_MS : MIN_YIELD_MS;
+  return Math.min(Math.max(yieldMs, minimum), MAX_WRITE_YIELD_MS);
+}
+
+function clampWriteYield(yieldMs: number, emptyPoll: boolean): number {
+  const minimum = emptyPoll ? MIN_POLL_YIELD_MS : MIN_YIELD_MS;
+  const maximum = emptyPoll ? MAX_POLL_YIELD_MS : MAX_WRITE_YIELD_MS;
+  return Math.min(Math.max(yieldMs, minimum), maximum);
 }
 
 function requireRuntime(runtime: RuntimeApi | null): RuntimeApi {

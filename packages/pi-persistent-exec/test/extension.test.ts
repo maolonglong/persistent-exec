@@ -21,6 +21,7 @@ interface TestTheme {
 
 interface RegisteredTool {
   description: string;
+  parameters: Record<string, unknown>;
   promptSnippet?: string;
   promptGuidelines?: string[];
   execute(
@@ -84,11 +85,20 @@ function createHarness() {
   };
 }
 
-test("exposes concise agent-facing tool metadata", () => {
+test("matches Codex tool descriptions", () => {
   const { tools } = createHarness();
   const exec = tools.get("exec_command");
   const stdin = tools.get("write_stdin");
   if (!exec || !stdin) throw new Error("persistent tools were not registered");
+
+  const windowsGuidance = `Windows safety rules:
+- Do not compose destructive filesystem commands across shells. Do not enumerate paths in PowerShell and then pass them to \`cmd /c\`, batch builtins, or another shell for deletion or moving. Use one shell end-to-end, prefer native PowerShell cmdlets such as \`Remove-Item\` / \`Move-Item\` with \`-LiteralPath\`, and avoid string-built shell commands for file operations.
+- Before any recursive delete or move on Windows, verify the resolved absolute target paths stay within the intended workspace or explicitly named target directory. Never issue a recursive delete or move against a computed path if the final target has not been checked.
+- When using \`Start-Process\` to launch a background helper or service, pass \`-WindowStyle Hidden\` unless the user explicitly asked for a visible interactive window. Use visible windows only for interactive tools the user needs to see or control.`;
+  const execDescription =
+    process.platform === "win32"
+      ? `Runs a command in a PTY, returning output or a session ID for ongoing interaction.\n\n${windowsGuidance}`
+      : "Runs a command in a PTY, returning output or a session ID for ongoing interaction.";
 
   expect({
     exec: {
@@ -103,17 +113,71 @@ test("exposes concise agent-facing tool metadata", () => {
     },
   }).toEqual({
     exec: {
-      description:
-        "Execute a shell command in workdir. Returns exit_code when complete or session_id when still running. Output keeps the tail within max_output_tokens and reports original_token_count when truncated.",
+      description: execDescription,
       promptSnippet: "Execute shell commands with persistent sessions and optional PTY interaction",
       promptGuidelines: undefined,
     },
     stdin: {
       description:
-        "Write characters to a running exec_command session, or omit chars to poll it. Returns exit_code when complete or session_id while still running. Output uses the same bounded tail as exec_command.",
+        "Writes characters to an existing unified exec session and returns recent output.",
       promptSnippet: "Write to or poll a running exec_command session",
       promptGuidelines: undefined,
     },
+  });
+});
+
+test("matches Codex schemas for supported parameters", () => {
+  const { tools } = createHarness();
+  const exec = tools.get("exec_command");
+  const stdin = tools.get("write_stdin");
+  if (!exec || !stdin) throw new Error("persistent tools were not registered");
+
+  const schema = (tool: RegisteredTool) => JSON.parse(JSON.stringify(tool.parameters));
+  const outputBudget =
+    "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy.";
+  const execYield =
+    process.platform === "win32"
+      ? "Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms."
+      : "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms.";
+
+  expect(schema(exec)).toEqual({
+    type: "object",
+    properties: {
+      cmd: { type: "string", description: "Shell command to execute." },
+      workdir: {
+        type: "string",
+        description: "Working directory for the command. Defaults to the turn cwd.",
+      },
+      tty: {
+        type: "boolean",
+        description: "True allocates a PTY for the command; false or omitted uses plain pipes.",
+      },
+      yield_time_ms: { type: "number", description: execYield },
+      max_output_tokens: { type: "number", description: outputBudget },
+    },
+    required: ["cmd"],
+    additionalProperties: false,
+  });
+  expect(schema(stdin)).toEqual({
+    type: "object",
+    properties: {
+      session_id: {
+        type: "number",
+        description: "Identifier of the running unified exec session.",
+      },
+      chars: {
+        type: "string",
+        description: "Bytes to write to stdin. Defaults to empty, which polls without writing.",
+      },
+      yield_time_ms: {
+        type: "number",
+        description:
+          "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default.",
+      },
+      max_output_tokens: { type: "number", description: outputBudget },
+    },
+    required: ["session_id"],
+    additionalProperties: false,
   });
 });
 

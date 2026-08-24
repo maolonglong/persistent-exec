@@ -8,6 +8,7 @@
 - Keep native output and session counts bounded. Partial output must be bounded as well as final output, and truncation metadata must include bytes omitted by the Rust runtime.
 - Unix cleanup owns process groups; Windows cleanup owns Job Objects. Do not claim that Unix processes which deliberately create a new session remain contained.
 - Keep each pi tool's `promptSnippet` to a one-line capability summary. Put the observable call/result contract in `description` and parameter descriptions.
+- Keep `exec_command` and `write_stdin` function descriptions and supported-parameter schemas verbatim-aligned with Codex; do not expose Codex parameters whose behavior this project does not implement.
 - Add `promptGuidelines` only for non-obvious behavior that the schema and descriptions cannot express. Do not instruct the model about tools removed from the active set.
 
 ## Cross-platform process behavior
