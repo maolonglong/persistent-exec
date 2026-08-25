@@ -183,6 +183,20 @@ test("matches Codex schemas for supported parameters", () => {
   });
 });
 
+test("truncates exec calls by visual lines", () => {
+  const exec = createHarness().tools.get("exec_command");
+  if (!exec?.renderCall) throw new Error("exec call renderer was not registered");
+
+  const command = "x".repeat(80);
+  const component = exec.renderCall({ cmd: command }, plainTheme, renderContext({ cmd: command }));
+  const lines = component.render(10);
+
+  expect(command).not.toContain("\n");
+  expect(lines).toHaveLength(4);
+  expect(lines.slice(0, 3).join("")).toStartWith("$ ");
+  expect(lines[3]).toBe("… +6 lines");
+});
+
 test("renders a compact output tail and full expanded output", () => {
   const exec = createHarness().tools.get("exec_command");
   if (!exec?.renderResult) throw new Error("exec renderer was not registered");

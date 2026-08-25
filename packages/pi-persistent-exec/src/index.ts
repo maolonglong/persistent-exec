@@ -18,6 +18,7 @@ const MAX_WRITE_YIELD_MS = 30_000;
 const MAX_POLL_YIELD_MS = 300_000;
 const DEFAULT_OUTPUT_TOKENS = 10_000;
 const MAX_OUTPUT_TOKENS = 12_500;
+const CALL_PREVIEW_LINES = 3;
 const OUTPUT_PREVIEW_LINES = 5;
 const INPUT_PREVIEW_CHARS = 80;
 
@@ -169,11 +170,11 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
     },
     renderCall(args, theme, context) {
       startRenderTimer(context.state as RenderState, context.executionStarted);
-      const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-      text.setText(
-        `${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", args.cmd || "...")}`,
-      );
-      return text;
+      const component =
+        (context.lastComponent as ToolCallRenderComponent | undefined) ??
+        new ToolCallRenderComponent(theme);
+      component.update(args.cmd || "...", theme);
+      return component;
     },
     renderResult(result, options, theme, context) {
       updateRenderTimer(context.state as RenderState, options.isPartial, context.isError, context);
@@ -473,6 +474,32 @@ function textContent(result: { content: Array<{ type: string; text?: string }> }
     .filter((item): item is { type: string; text: string } => typeof item.text === "string")
     .map((item) => item.text)
     .join("\n");
+}
+
+class ToolCallRenderComponent {
+  private readonly text = new Text("", 0, 0);
+  private theme: ToolTheme;
+
+  constructor(theme: ToolTheme) {
+    this.theme = theme;
+  }
+
+  update(command: string, theme: ToolTheme): void {
+    this.theme = theme;
+    this.text.setText(`${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", command)}`);
+  }
+
+  render(width: number): string[] {
+    const lines = this.text.render(width);
+    if (lines.length <= CALL_PREVIEW_LINES) return lines;
+    const skipped = lines.length - CALL_PREVIEW_LINES;
+    const notice = this.theme.fg("muted", `… +${skipped} ${skipped === 1 ? "line" : "lines"}`);
+    return [...lines.slice(0, CALL_PREVIEW_LINES), truncateToWidth(notice, width, "...")];
+  }
+
+  invalidate(): void {
+    this.text.invalidate();
+  }
 }
 
 class ToolResultRenderComponent extends Container {
