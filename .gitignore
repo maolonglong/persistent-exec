@@ -3,6 +3,7 @@
 /packages/*/dist
 /packages/*/LICENSE
 /packages/*/NOTICE
+.amp/portals/*
 *.dylib
 *.so
 *.dll

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source "$HOME/.cargo/env"
+
+rustc --version
+cargo --version
+node --version
+npm --version
+bun --version
