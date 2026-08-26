@@ -8,7 +8,7 @@ on:
       release_tag:
         description: Release version to validate without publishing
         required: true
-        default: v0.1.2
+        default: v0.1.3
 
 env:
   RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}

@@ -1,6 +1,6 @@
 {
   "name": "persistent-exec-bun",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Bun FFI bindings for the persistent-exec native runtime",
   "homepage": "https://github.com/maolonglong/persistent-exec#readme",
   "bugs": {
@@ -39,13 +39,13 @@
     "typescript": "^5.9.0"
   },
   "optionalDependencies": {
-    "persistent-exec-bin-darwin-arm64": "0.1.2",
-    "persistent-exec-bin-darwin-x64": "0.1.2",
-    "persistent-exec-bin-linux-arm64-gnu": "0.1.2",
-    "persistent-exec-bin-linux-arm64-musl": "0.1.2",
-    "persistent-exec-bin-linux-x64-gnu": "0.1.2",
-    "persistent-exec-bin-linux-x64-musl": "0.1.2",
-    "persistent-exec-bin-win32-arm64": "0.1.2",
-    "persistent-exec-bin-win32-x64": "0.1.2"
+    "persistent-exec-bin-darwin-arm64": "0.1.3",
+    "persistent-exec-bin-darwin-x64": "0.1.3",
+    "persistent-exec-bin-linux-arm64-gnu": "0.1.3",
+    "persistent-exec-bin-linux-arm64-musl": "0.1.3",
+    "persistent-exec-bin-linux-x64-gnu": "0.1.3",
+    "persistent-exec-bin-linux-x64-musl": "0.1.3",
+    "persistent-exec-bin-win32-arm64": "0.1.3",
+    "persistent-exec-bin-win32-x64": "0.1.3"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "persistent-exec-bin-darwin-arm64",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Native persistent-exec runtime for macOS ARM64",
   "homepage": "https://github.com/maolonglong/persistent-exec#readme",
   "bugs": {

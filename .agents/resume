@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # shellcheck disable=SC1091
-source "$HOME/.cargo/env"
+[[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
 
 rustc --version
 cargo --version
