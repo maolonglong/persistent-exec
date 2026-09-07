@@ -9,17 +9,20 @@ try {
   });
 
   let output = "";
+  let originalBytes = 0;
   let exitCode = null;
   const deadline = Date.now() + 5000;
   while (exitCode === null) {
     const poll = runtime.poll(sessionId);
     output += poll.output;
+    originalBytes += poll.original_bytes;
     exitCode = poll.exit_code;
     if (exitCode === null) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.ok(Date.now() < deadline, "command did not exit in time");
   }
 
   assert.deepEqual({ output, exitCode }, { output: "node-sdk", exitCode: 0 });
+  assert.equal(originalBytes, Buffer.byteLength(output));
 
   const utf8SessionId = runtime.spawn({
     cmd: "node -e \"process.stdout.write('ready');process.stdout.write(Buffer.from([0xe2,0x82]));setTimeout(()=>process.stdout.write(Buffer.from([0xac])),500)\"",

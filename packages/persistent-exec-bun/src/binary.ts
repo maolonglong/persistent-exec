@@ -43,6 +43,13 @@ export function findBinary(): string {
     return override;
   }
 
+  // A development build must win over an installed, previously published binary.
+  const here = dirname(fileURLToPath(import.meta.url));
+  for (const profile of ["debug", "release"]) {
+    const candidate = resolve(here, `../../../target/${profile}/${libraryFilename()}`);
+    if (existsSync(candidate)) return candidate;
+  }
+
   const packageName = PLATFORM_PACKAGES[platformKey()];
   if (packageName) {
     try {
@@ -50,14 +57,8 @@ export function findBinary(): string {
       const candidate = join(dirname(manifest), libraryFilename());
       if (existsSync(candidate)) return candidate;
     } catch {
-      // Fall through to development builds.
+      // Report a missing native library below.
     }
-  }
-
-  const here = dirname(fileURLToPath(import.meta.url));
-  for (const profile of ["debug", "release"]) {
-    const candidate = resolve(here, `../../../target/${profile}/${libraryFilename()}`);
-    if (existsSync(candidate)) return candidate;
   }
 
   throw new Error(
