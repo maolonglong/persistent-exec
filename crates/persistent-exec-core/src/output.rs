@@ -4,39 +4,51 @@ pub(crate) const OUTPUT_BYTES_CAP: usize = 1024 * 1024;
 
 #[derive(Debug, Default)]
 pub(crate) struct OutputBuffer {
-    bytes: VecDeque<u8>,
+    head: Vec<u8>,
+    tail: VecDeque<u8>,
     omitted_bytes: usize,
 }
 
 impl OutputBuffer {
     pub(crate) fn push(&mut self, chunk: &[u8]) {
-        if chunk.len() >= OUTPUT_BYTES_CAP {
-            self.omitted_bytes = self
-                .omitted_bytes
-                .saturating_add(self.bytes.len())
-                .saturating_add(chunk.len() - OUTPUT_BYTES_CAP);
-            self.bytes.clear();
-            self.bytes
-                .extend(chunk[chunk.len() - OUTPUT_BYTES_CAP..].iter().copied());
+        let head_cap = OUTPUT_BYTES_CAP / 2;
+        let head_remaining = head_cap.saturating_sub(self.head.len());
+        let head_len = head_remaining.min(chunk.len());
+        self.head.extend_from_slice(&chunk[..head_len]);
+
+        let rest = &chunk[head_len..];
+        if rest.is_empty() {
             return;
         }
 
+        let tail_cap = OUTPUT_BYTES_CAP - head_cap;
+        if rest.len() >= tail_cap {
+            self.omitted_bytes = self
+                .omitted_bytes
+                .saturating_add(self.tail.len())
+                .saturating_add(rest.len() - tail_cap);
+            self.tail.clear();
+            self.tail
+                .extend(rest[rest.len() - tail_cap..].iter().copied());
+            return;
+        }
         let overflow = self
-            .bytes
+            .tail
             .len()
-            .saturating_add(chunk.len())
-            .saturating_sub(OUTPUT_BYTES_CAP);
+            .saturating_add(rest.len())
+            .saturating_sub(tail_cap);
         for _ in 0..overflow {
-            self.bytes.pop_front();
+            self.tail.pop_front();
         }
         self.omitted_bytes = self.omitted_bytes.saturating_add(overflow);
-        self.bytes.extend(chunk.iter().copied());
+        self.tail.extend(rest.iter().copied());
     }
 
-    pub(crate) fn take(&mut self) -> (Vec<u8>, usize) {
+    pub(crate) fn take(&mut self) -> (Vec<u8>, Vec<u8>, usize) {
         let omitted_bytes = std::mem::take(&mut self.omitted_bytes);
-        let bytes = self.bytes.drain(..).collect();
-        (bytes, omitted_bytes)
+        let head = std::mem::take(&mut self.head);
+        let tail = self.tail.drain(..).collect();
+        (head, tail, omitted_bytes)
     }
 }
 

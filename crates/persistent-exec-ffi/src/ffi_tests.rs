@@ -7,6 +7,7 @@ use std::time::Instant;
 use pretty_assertions::assert_eq;
 use serde::Deserialize;
 
+use super::FfiRuntime;
 use super::PersistentExecResult;
 use super::decode_utf8;
 use super::persistent_exec_create;
@@ -19,6 +20,7 @@ use super::persistent_exec_spawn;
 struct PollResult {
     output: String,
     omitted_bytes: usize,
+    original_bytes: usize,
     exit_code: Option<i32>,
 }
 
@@ -64,12 +66,14 @@ fn c_abi_runs_and_polls_a_command() {
         .expect("request should not contain NUL");
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut output = String::new();
+    let mut original_bytes = 0;
     let exit_code = loop {
         let poll = unsafe { persistent_exec_poll(handle, poll_request.as_ptr()) };
         let (_, _, data) = unsafe { take_result(poll) };
         let data: PollResult = serde_json::from_str(data.as_deref().expect("poll data expected"))
             .expect("poll data should deserialize");
         output.push_str(&data.output);
+        original_bytes += data.original_bytes;
         if let Some(exit_code) = data.exit_code {
             break exit_code;
         }
@@ -81,6 +85,7 @@ fn c_abi_runs_and_polls_a_command() {
         (output, exit_code),
         (expected_short_output().to_string(), 0)
     );
+    assert_eq!(original_bytes, expected_short_output().len());
     unsafe { persistent_exec_destroy(handle) };
 }
 
@@ -113,6 +118,21 @@ fn utf8_decoder_preserves_code_points_across_poll_boundaries() {
     pending.push(0xac);
     assert_eq!(decode_utf8(&mut pending, /*flush*/ false), "€");
     assert_eq!(pending, Vec::<u8>::new());
+}
+
+#[test]
+fn omission_notice_separates_utf8_discontinuity_and_reports_exact_bytes() {
+    let runtime = FfiRuntime::new().expect("runtime should initialize");
+    let output = runtime.decode_output(7, vec![b'h', 0xe2], vec![0x82, 0xac, b't'], 19, Some(0));
+
+    assert_eq!(output, "h�\n... 19 bytes omitted ...\n��t");
+}
+
+#[test]
+fn final_poll_preserves_utf8_across_retained_segments_without_omission() {
+    let runtime = FfiRuntime::new().expect("runtime should initialize");
+    let output = runtime.decode_output(7, vec![0xe2], vec![0x82, 0xac], 0, Some(0));
+    assert_eq!(output, "€");
 }
 
 #[test]

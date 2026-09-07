@@ -312,19 +312,7 @@ async fn spawn_process_preserving_fds(
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr))
             .pre_exec(move || {
-                for signo in &[
-                    libc::SIGCHLD,
-                    libc::SIGHUP,
-                    libc::SIGINT,
-                    libc::SIGQUIT,
-                    libc::SIGTERM,
-                    libc::SIGALRM,
-                ] {
-                    libc::signal(*signo, libc::SIG_DFL);
-                }
-
-                let empty_set: libc::sigset_t = std::mem::zeroed();
-                libc::sigprocmask(libc::SIG_SETMASK, &empty_set, std::ptr::null_mut());
+                crate::process_group::reset_child_signals()?;
 
                 #[cfg(target_os = "linux")]
                 {

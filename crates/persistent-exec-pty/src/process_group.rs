@@ -19,6 +19,33 @@ use std::io;
 
 use tokio::process::Child;
 
+#[cfg(unix)]
+/// Restore exec-like signal state in a child created from a multi-threaded parent.
+pub(crate) fn reset_child_signals() -> io::Result<()> {
+    for signal in [
+        libc::SIGCHLD,
+        libc::SIGHUP,
+        libc::SIGINT,
+        libc::SIGQUIT,
+        libc::SIGTERM,
+        libc::SIGALRM,
+    ] {
+        if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    let mut empty_set = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+    if unsafe { libc::sigemptyset(empty_set.as_mut_ptr()) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    if unsafe { libc::sigprocmask(libc::SIG_SETMASK, empty_set.as_ptr(), std::ptr::null_mut()) }
+        == -1
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 /// Ensure the child receives SIGTERM when the original parent dies.
 ///

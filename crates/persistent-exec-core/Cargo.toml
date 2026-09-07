@@ -16,4 +16,5 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+libc.workspace = true
 pretty_assertions.workspace = true

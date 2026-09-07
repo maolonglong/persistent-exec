@@ -22,6 +22,8 @@ export interface SpawnOptions {
 export interface NativePollResult {
   output: string;
   omitted_bytes: number;
+  /** Bytes emitted by the process, excluding any native omission notice. */
+  original_bytes: number;
   exit_code: number | null;
 }
 

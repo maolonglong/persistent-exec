@@ -1,7 +1,9 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
+import { stripVTControlCharacters } from "node:util";
 import { type ExtensionAPI, initTheme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import persistentExecExtension from "../src/index";
+import { loadSdk, type RuntimeApi } from "../src/sdk";
 
 initTheme("dark");
 
@@ -13,6 +15,8 @@ interface RenderContext {
   lastComponent?: Component;
   invalidate(): void;
   executionStarted: boolean;
+  expanded: boolean;
+  isPartial: boolean;
   isError: boolean;
 }
 
@@ -56,19 +60,21 @@ function renderContext(
     state,
     invalidate() {},
     executionStarted: true,
+    expanded: false,
+    isPartial: true,
     isError: false,
   };
 }
 
 function createHarness() {
   const tools = new Map<string, RegisteredTool>();
-  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
   let activeTools = ["read", "bash", "write"];
   const pi = {
     registerTool(tool: RegisteredTool & { name: string }) {
       tools.set(tool.name, tool);
     },
-    on(event: string, handler: (...args: unknown[]) => Promise<void>) {
+    on(event: string, handler: (...args: unknown[]) => Promise<unknown>) {
       handlers.set(event, handler);
     },
     getActiveTools() {
@@ -195,6 +201,12 @@ test("truncates exec calls by visual lines", () => {
   expect(lines).toHaveLength(4);
   expect(lines.slice(0, 3).join("")).toStartWith("$ ");
   expect(lines[3]).toBe("… +6 lines");
+
+  const expandedContext = renderContext({ cmd: command });
+  expandedContext.expanded = true;
+  expandedContext.lastComponent = component;
+  const expanded = exec.renderCall({ cmd: command }, plainTheme, expandedContext);
+  expect(expanded.render(10).join("")).toContain(command);
 });
 
 test("renders a compact output tail and full expanded output", () => {
@@ -294,6 +306,7 @@ test("renders semantic stdin actions with bounded escaped input", () => {
     renderContext({ session_id: 7 }, state),
   );
   pollContext.lastComponent = poll;
+  pollContext.isPartial = false;
   const waited = stdin.renderCall({ session_id: 7 }, plainTheme, pollContext);
   expect(waited.render(80).join("\n")).toContain("Waited for session 7");
 });
@@ -440,4 +453,247 @@ test("bounds final and partial output while preserving original size", async () 
   expect(Buffer.byteLength(String(result.details.output), "utf8")).toBeLessThan(200);
   expect(Number(result.details.original_token_count)).toBeGreaterThan(400_000);
   await harness.handlers.get("session_shutdown")?.();
+});
+
+async function mockHarness(overrides: Partial<RuntimeApi> = {}) {
+  const runtime: RuntimeApi = {
+    spawn: () => 1,
+    write() {},
+    poll: () => ({ output: "", original_bytes: 0, omitted_bytes: 0, exit_code: null }),
+    terminate() {},
+    destroy() {},
+    ...overrides,
+  };
+  const sdk = await loadSdk();
+  const create = spyOn(sdk.PersistentExecRuntime, "create").mockReturnValue(runtime);
+  const harness = createHarness();
+  try {
+    await harness.handlers.get("session_start")?.();
+  } finally {
+    create.mockRestore();
+  }
+  return harness;
+}
+
+test("cancelling a queued write preserves the predecessor's lock", async () => {
+  const writes: string[] = [];
+  const harness = await mockHarness({ write: (_id, chars = "") => writes.push(chars) });
+  const stdin = harness.tools.get("write_stdin")!;
+  const context = { cwd: process.cwd() };
+  const a = new AbortController();
+  const b = new AbortController();
+  const c = new AbortController();
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => (started = resolve));
+  const first = stdin.execute("a", { session_id: 1 }, a.signal, started, context);
+  await ready;
+  const queued = stdin.execute("b", { session_id: 1, chars: "B" }, b.signal, undefined, context);
+  b.abort();
+  await expect(queued).rejects.toThrow();
+  const last = stdin.execute(
+    "c",
+    { session_id: 1, chars: "C" },
+    c.signal,
+    () => c.abort(),
+    context,
+  );
+  try {
+    // Flush runnable callbacks; A cannot finish until explicitly cancelled below.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(writes).toEqual([]);
+  } finally {
+    a.abort();
+    await first;
+    await last;
+    await harness.handlers.get("session_shutdown")?.();
+  }
+  expect(writes).toEqual(["C"]);
+});
+
+test("validates all parameters and cancellation before side effects", async () => {
+  let spawns = 0;
+  let writes = 0;
+  const harness = await mockHarness({
+    spawn: () => ++spawns,
+    write: () => {
+      writes++;
+    },
+  });
+  const context = { cwd: process.cwd() };
+  const stdin = harness.tools.get("write_stdin")!;
+  for (const invalid of [{ yield_time_ms: -1 }, { max_output_tokens: 0.5 }]) {
+    await expect(
+      stdin.execute(
+        "invalid",
+        { session_id: 1, chars: "SIDE_EFFECT", ...invalid },
+        undefined,
+        undefined,
+        context,
+      ),
+    ).rejects.toThrow();
+  }
+  const controller = new AbortController();
+  controller.abort();
+  await expect(
+    stdin.execute(
+      "aborted",
+      { session_id: 1, chars: "SIDE_EFFECT" },
+      controller.signal,
+      undefined,
+      context,
+    ),
+  ).rejects.toThrow();
+  await expect(
+    harness.tools
+      .get("exec_command")!
+      .execute("aborted", { cmd: "SIDE_EFFECT" }, controller.signal, undefined, context),
+  ).rejects.toThrow();
+  expect({ spawns, writes }).toEqual({ spawns: 0, writes: 0 });
+  await harness.handlers.get("session_shutdown")?.();
+});
+
+test("cancelled exec preserves partial output and termination drain", async () => {
+  let terminated = false;
+  const harness = await mockHarness({
+    terminate: () => {
+      terminated = true;
+    },
+    poll: () => ({
+      output: terminated ? "drained" : "diagnostic",
+      original_bytes: terminated ? 7 : 10,
+      omitted_bytes: 0,
+      exit_code: terminated ? 137 : null,
+    }),
+  });
+  const controller = new AbortController();
+  const result = await harness.tools.get("exec_command")!.execute(
+    "cancel",
+    { cmd: "command" },
+    controller.signal,
+    (update) => {
+      if (update.content.length) controller.abort();
+    },
+    { cwd: process.cwd() },
+  );
+  expect(terminated).toBe(true);
+  expect(result.details).toMatchObject({
+    output: "diagnosticdrained",
+    exit_code: 137,
+    cancelled: true,
+  });
+  expect(result.details.session_id).toBeUndefined();
+  expect(JSON.parse(result.content[0].text)).toEqual(result.details);
+  expect(
+    await harness.handlers.get("tool_result")?.({ toolName: "exec_command", ...result }),
+  ).toEqual({ isError: true });
+  await harness.handlers.get("session_shutdown")?.();
+});
+
+test("cancelled poll preserves consumed output without terminating the session", async () => {
+  let polls = 0;
+  let terminated = false;
+  const harness = await mockHarness({
+    terminate: () => {
+      terminated = true;
+    },
+    poll: () => ({
+      output: ++polls === 1 ? "first" : "later",
+      original_bytes: 5,
+      omitted_bytes: 0,
+      exit_code: polls === 1 ? null : 0,
+    }),
+  });
+  const controller = new AbortController();
+  const stdin = harness.tools.get("write_stdin")!;
+  const context = { cwd: process.cwd() };
+  const first = await stdin.execute(
+    "cancel",
+    { session_id: 1 },
+    controller.signal,
+    (update) => {
+      if (update.content.length) controller.abort();
+    },
+    context,
+  );
+  expect(first.details).toMatchObject({ output: "first", session_id: 1, cancelled: true });
+  expect(terminated).toBe(false);
+  const later = await stdin.execute("later", { session_id: 1 }, undefined, undefined, context);
+  expect(later.details).toMatchObject({ output: "later", exit_code: 0 });
+  await harness.handlers.get("session_shutdown")?.();
+});
+
+test("pi final frame expands commands, completes poll titles and uses failure background", async () => {
+  const { ToolExecutionComponent } =
+    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js");
+  const { theme } =
+    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js");
+  const harness = createHarness();
+  const command = "echo first\necho second\necho third\necho CRITICAL_LAST_COMMAND";
+  const ui = { requestRender() {} };
+  const tool = harness.tools.get("exec_command")!;
+  const component = new ToolExecutionComponent(
+    "exec_command",
+    "call",
+    { cmd: command },
+    {},
+    tool as never,
+    ui as never,
+    process.cwd(),
+  );
+  const result = {
+    content: [{ type: "text" as const, text: "diagnostic" }],
+    details: { output: "diagnostic", exit_code: 7, wall_time_seconds: 1 },
+  };
+  const status = (await harness.handlers.get("tool_result")?.({
+    toolName: "exec_command",
+    ...result,
+  })) as { isError: boolean };
+  expect(status).toEqual({ isError: true });
+  component.updateResult({ ...result, ...status });
+  expect(stripVTControlCharacters(component.render(48).join("\n"))).not.toContain(
+    "CRITICAL_LAST_COMMAND",
+  );
+  component.setExpanded(true);
+  const expanded = component.render(48).join("\n");
+  expect(stripVTControlCharacters(expanded)).toContain("CRITICAL_LAST_COMMAND");
+  expect(stripVTControlCharacters(expanded)).toContain("Exit 7");
+  expect(expanded).toContain(theme.bg("toolErrorBg", " ".repeat(48)));
+
+  const poll = new ToolExecutionComponent(
+    "write_stdin",
+    "poll",
+    { session_id: 1 },
+    {},
+    harness.tools.get("write_stdin") as never,
+    ui as never,
+    process.cwd(),
+  );
+  poll.markExecutionStarted();
+  poll.updateResult({ content: [], details: { session_id: 1, output: "" }, isError: false }, true);
+  poll.updateResult({ content: [], details: { output: "", exit_code: 0 }, isError: false });
+  expect(stripVTControlCharacters(poll.render(48).join("\n"))).toContain("Waited for session 1");
+});
+
+test("native exec cancellation returns captured output and a terminal result", async () => {
+  const harness = createHarness();
+  await harness.handlers.get("session_start")?.();
+  const controller = new AbortController();
+  try {
+    const result = await harness.tools.get("exec_command")!.execute(
+      "cancel-native",
+      { cmd: "node -e \"process.stdout.write('cancel-ready');setInterval(()=>{},1000)\"" },
+      controller.signal,
+      (update) => {
+        if (update.content[0]?.text.includes("cancel-ready")) controller.abort();
+      },
+      { cwd: process.cwd() },
+    );
+    expect(result.details.cancelled).toBe(true);
+    expect(result.details.output).toContain("cancel-ready");
+    expect(typeof result.details.exit_code).toBe("number");
+    expect(result.details.exit_code).not.toBe(0);
+    expect(result.details.session_id).toBeUndefined();
+  } finally {
+    await harness.handlers.get("session_shutdown")?.();
+  }
 });

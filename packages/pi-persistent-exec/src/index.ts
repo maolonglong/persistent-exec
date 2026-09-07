@@ -1,8 +1,9 @@
 import { resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { keyHint, truncateTail, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
+import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { OutputBuffer } from "./output";
 import { loadSdk, type RuntimeApi } from "./sdk";
 
 const EXEC_TOOL = "exec_command";
@@ -28,6 +29,7 @@ interface ToolOutput {
   exit_code?: number;
   session_id?: number;
   original_token_count?: number;
+  cancelled?: boolean;
 }
 
 interface WaitResult {
@@ -35,6 +37,7 @@ interface WaitResult {
   exitCode: number | null;
   originalBytes: number;
   truncated: boolean;
+  cancelled?: boolean;
 }
 
 interface RenderState {
@@ -135,45 +138,49 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
       const maxOutputTokens =
         optionalUnsignedInteger(params.max_output_tokens, "max_output_tokens") ??
         DEFAULT_OUTPUT_TOKENS;
+      signal?.throwIfAborted();
       const sessionId = activeRuntime.spawn({
         cmd: params.cmd,
         workdir: resolve(ctx.cwd, params.workdir ?? "."),
         tty: params.tty ?? false,
       });
-      const startedAt = performance.now();
-      onUpdate?.({
-        content: [],
-        details: { session_id: sessionId, output: "" },
-      });
-      let waited: WaitResult;
-      try {
-        waited = await waitForSession(
-          activeRuntime,
-          sessionId,
-          yieldMs,
-          maxOutputTokens,
-          signal,
-          (output) => {
-            onUpdate?.({
-              content: [{ type: "text", text: output }],
-              details: { session_id: sessionId, output },
-            });
-          },
-        );
-      } catch (error) {
-        activeRuntime.terminate(sessionId);
-        await drainTerminatedSession(activeRuntime, sessionId);
-        throw error;
-      }
+      return withSessionLock(sessionInteractions, sessionId, undefined, async () => {
+        const startedAt = performance.now();
+        onUpdate?.({
+          content: [],
+          details: { session_id: sessionId, output: "" },
+        });
+        let waited: WaitResult;
+        try {
+          waited = await waitForSession(
+            activeRuntime,
+            sessionId,
+            yieldMs,
+            maxOutputTokens,
+            signal,
+            (output) => {
+              onUpdate?.({
+                content: [{ type: "text", text: output }],
+                details: { session_id: sessionId, output },
+              });
+            },
+            true,
+          );
+        } catch (error) {
+          activeRuntime.terminate(sessionId);
+          await drainTerminatedSession(activeRuntime, sessionId);
+          throw error;
+        }
 
-      return toolResult(waited, sessionId, startedAt);
+        return toolResult(waited, sessionId, startedAt);
+      });
     },
     renderCall(args, theme, context) {
       startRenderTimer(context.state as RenderState, context.executionStarted);
       const component =
         (context.lastComponent as ToolCallRenderComponent | undefined) ??
         new ToolCallRenderComponent(theme);
-      component.update(args.cmd || "...", theme);
+      component.update(args.cmd || "...", theme, context.expanded);
       return component;
     },
     renderResult(result, options, theme, context) {
@@ -193,19 +200,20 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
     promptSnippet: "Write to or poll a running exec_command session",
     parameters: stdinParameters,
     async execute(_toolCallId, params, signal, onUpdate) {
-      return withSessionLock(sessionInteractions, params.session_id, signal, async () => {
+      const sessionId = positiveInteger(params.session_id, "session_id");
+      const chars = params.chars ?? "";
+      const defaultYield = chars === "" ? DEFAULT_POLL_YIELD_MS : DEFAULT_WRITE_YIELD_MS;
+      const requestedYield =
+        optionalUnsignedInteger(params.yield_time_ms, "yield_time_ms") ?? defaultYield;
+      const yieldMs = clampWriteYield(requestedYield, chars === "");
+      const maxOutputTokens =
+        optionalUnsignedInteger(params.max_output_tokens, "max_output_tokens") ??
+        DEFAULT_OUTPUT_TOKENS;
+      return withSessionLock(sessionInteractions, sessionId, signal, async () => {
         const activeRuntime = requireRuntime(runtime);
-        const sessionId = positiveInteger(params.session_id, "session_id");
-        const chars = params.chars ?? "";
+        signal?.throwIfAborted();
         if (chars !== "") activeRuntime.write(sessionId, chars);
 
-        const defaultYield = chars === "" ? DEFAULT_POLL_YIELD_MS : DEFAULT_WRITE_YIELD_MS;
-        const requestedYield =
-          optionalUnsignedInteger(params.yield_time_ms, "yield_time_ms") ?? defaultYield;
-        const yieldMs = clampWriteYield(requestedYield, chars === "");
-        const maxOutputTokens =
-          optionalUnsignedInteger(params.max_output_tokens, "max_output_tokens") ??
-          DEFAULT_OUTPUT_TOKENS;
         const startedAt = performance.now();
         onUpdate?.({
           content: [],
@@ -234,7 +242,7 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
       const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
       const label = args.chars
         ? `Wrote to session ${args.session_id}`
-        : `${state.endedAt === undefined ? "Waiting" : "Waited"} for session ${args.session_id}`;
+        : `${context.isPartial ? "Waiting" : "Waited"} for session ${args.session_id}`;
       const input = args.chars ? ` · ${previewInput(args.chars)}` : "";
       text.setText(
         `${theme.fg("toolTitle", theme.bold(args.chars ? "↳" : "•"))} ${theme.fg("dim", `${label}${input}`)}`,
@@ -249,6 +257,14 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
       component.update(result, options, context.state as RenderState, theme, context.isError);
       return component;
     },
+  });
+
+  pi.on("tool_result", async (event) => {
+    if (event.toolName !== EXEC_TOOL && event.toolName !== STDIN_TOOL) return;
+    const details = event.details as Partial<ToolOutput> | undefined;
+    if (details?.cancelled || (details?.exit_code !== undefined && details.exit_code !== 0)) {
+      return { isError: true };
+    }
   });
 
   pi.on("session_start", async () => {
@@ -324,7 +340,10 @@ async function withSessionLock<T>(
     return await operation();
   } finally {
     release?.();
-    if (locks.get(sessionId) === current) locks.delete(sessionId);
+    // A cancelled waiter must not remove a still-active predecessor's lock.
+    void current.then(() => {
+      if (locks.get(sessionId) === current) locks.delete(sessionId);
+    });
   }
 }
 
@@ -357,32 +376,44 @@ async function waitForSession(
   maxOutputTokens: number,
   signal: AbortSignal | undefined,
   onOutput: (output: string) => void,
+  terminateOnAbort = false,
 ): Promise<WaitResult> {
   const deadline = performance.now() + yieldMs;
   const maxBytes = Math.min(maxOutputTokens, MAX_OUTPUT_TOKENS) * 4;
-  let output = "";
-  let originalBytes = 0;
-  let truncated = false;
-  while (true) {
-    signal?.throwIfAborted();
-    const poll = runtime.poll(sessionId);
-    if (poll.output || poll.omitted_bytes > 0) {
-      originalBytes += Buffer.byteLength(poll.output, "utf8") + poll.omitted_bytes;
-      const next = truncateTail(output + poll.output, { maxBytes, maxLines: 2_000 });
-      output = next.content;
-      truncated ||= next.truncated || poll.omitted_bytes > 0;
-      onOutput(formatOutput(output, originalBytes, truncated));
-    }
-    const result = { output, originalBytes, truncated };
-    if (poll.exit_code !== null) return { ...result, exitCode: poll.exit_code };
+  const output = new OutputBuffer(maxBytes);
+  const snapshot = (): WaitResult => ({
+    output: output.output,
+    originalBytes: output.originalBytes,
+    truncated: output.truncated,
+    exitCode: null,
+  });
+  try {
+    while (true) {
+      signal?.throwIfAborted();
+      const poll = runtime.poll(sessionId);
+      output.append(poll);
+      if (poll.output || poll.omitted_bytes > 0) {
+        onOutput(formatOutput(output.output, output.originalBytes, output.truncated));
+      }
+      if (poll.exit_code !== null) return { ...snapshot(), exitCode: poll.exit_code };
 
-    const remaining = deadline - performance.now();
-    if (remaining <= 0) return { ...result, exitCode: null };
-    await abortableDelay(Math.min(POLL_INTERVAL_MS, remaining), signal);
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) return snapshot();
+      await abortableDelay(Math.min(POLL_INTERVAL_MS, remaining), signal);
+    }
+  } catch (error) {
+    if (!signal?.aborted) throw error;
+    let exitCode: number | null = null;
+    if (terminateOnAbort) {
+      runtime.terminate(sessionId);
+      exitCode = await drainTerminatedSession(runtime, sessionId, output);
+    }
+    return { ...snapshot(), exitCode, cancelled: true };
   }
 }
 
 function abortableDelay(milliseconds: number, signal: AbortSignal | undefined): Promise<void> {
+  signal?.throwIfAborted();
   if (!signal) return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
   return new Promise((resolveDelay, reject) => {
     const timer = setTimeout(() => {
@@ -397,16 +428,23 @@ function abortableDelay(milliseconds: number, signal: AbortSignal | undefined): 
   });
 }
 
-async function drainTerminatedSession(runtime: RuntimeApi, sessionId: number): Promise<void> {
+async function drainTerminatedSession(
+  runtime: RuntimeApi,
+  sessionId: number,
+  output?: OutputBuffer,
+): Promise<number | null> {
   const deadline = performance.now() + 1_000;
   while (performance.now() < deadline) {
     try {
-      if (runtime.poll(sessionId).exit_code !== null) return;
+      const poll = runtime.poll(sessionId);
+      output?.append(poll);
+      if (poll.exit_code !== null) return poll.exit_code;
     } catch {
-      return;
+      return null;
     }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, POLL_INTERVAL_MS));
   }
+  return null;
 }
 
 function toolResult(waited: WaitResult, sessionId: number, startedAt: number) {
@@ -416,6 +454,7 @@ function toolResult(waited: WaitResult, sessionId: number, startedAt: number) {
     output: formatOutput(waited.output, waited.originalBytes, waited.truncated),
     ...(waited.exitCode === null ? { session_id: sessionId } : { exit_code: waited.exitCode }),
     ...(originalTokenCount === undefined ? {} : { original_token_count: originalTokenCount }),
+    ...(waited.cancelled ? { cancelled: true } : {}),
   };
   return {
     content: [{ type: "text" as const, text: JSON.stringify(details) }],
@@ -426,7 +465,8 @@ function toolResult(waited: WaitResult, sessionId: number, startedAt: number) {
 function formatOutput(output: string, originalBytes: number, truncated: boolean): string {
   if (!truncated) return output;
   const originalTokenCount = Math.ceil(originalBytes / 4);
-  return `${output}\n\n[Output truncated from approximately ${originalTokenCount} tokens.]`;
+  // ponytail: no disk spool; add bounded retention only if recovering omitted output becomes necessary.
+  return `${output}\n\n[Output truncated from approximately ${originalTokenCount} tokens. Omitted output is not retained.]`;
 }
 
 function startRenderTimer(state: RenderState, executionStarted: boolean): void {
@@ -461,11 +501,13 @@ function previewInput(input: string): string {
 }
 
 function splitOutputNotice(output: string): { output: string; notice?: string } {
-  const match = output.match(/\n\n\[Output truncated from approximately (\d+) tokens\.\]$/);
+  const match = output.match(
+    /\n\n\[(Output truncated from approximately \d+ tokens\.(?: Omitted output is not retained\.)?)\]$/,
+  );
   if (!match || match.index === undefined) return { output };
   return {
     output: output.slice(0, match.index),
-    notice: `Output truncated from approximately ${match[1]} tokens`,
+    notice: match[1],
   };
 }
 
@@ -479,19 +521,21 @@ function textContent(result: { content: Array<{ type: string; text?: string }> }
 class ToolCallRenderComponent {
   private readonly text = new Text("", 0, 0);
   private theme: ToolTheme;
+  private expanded = false;
 
   constructor(theme: ToolTheme) {
     this.theme = theme;
   }
 
-  update(command: string, theme: ToolTheme): void {
+  update(command: string, theme: ToolTheme, expanded: boolean): void {
     this.theme = theme;
+    this.expanded = expanded;
     this.text.setText(`${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", command)}`);
   }
 
   render(width: number): string[] {
     const lines = this.text.render(width);
-    if (lines.length <= CALL_PREVIEW_LINES) return lines;
+    if (this.expanded || lines.length <= CALL_PREVIEW_LINES) return lines;
     const skipped = lines.length - CALL_PREVIEW_LINES;
     const notice = this.theme.fg("muted", `… +${skipped} ${skipped === 1 ? "line" : "lines"}`);
     return [...lines.slice(0, CALL_PREVIEW_LINES), truncateToWidth(notice, width, "...")];
@@ -587,7 +631,11 @@ function formatRenderStatus(
     const session = details?.session_id === undefined ? "" : ` · session ${details.session_id}`;
     return `${theme.fg("warning", "Running")}${theme.fg("dim", `${session} · elapsed ${duration}`)}`;
   }
-  if (isError || !details) {
+  if (details?.cancelled) {
+    const session = details.session_id === undefined ? "" : ` · session ${details.session_id}`;
+    return `${theme.fg("warning", "Cancelled")}${theme.fg("dim", `${session} · waited ${duration}`)}`;
+  }
+  if (!details || (isError && details.exit_code === undefined)) {
     return `${theme.fg("error", "Failed")}${theme.fg("dim", ` · took ${duration}`)}`;
   }
   if (details.exit_code === undefined) {

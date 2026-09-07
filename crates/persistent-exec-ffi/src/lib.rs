@@ -34,7 +34,8 @@ impl FfiRuntime {
     fn decode_output(
         &self,
         session_id: u64,
-        output: Vec<u8>,
+        head: Vec<u8>,
+        tail: Vec<u8>,
         omitted_bytes: usize,
         exit_code: Option<i32>,
     ) -> String {
@@ -43,12 +44,12 @@ impl FfiRuntime {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let pending = pending_by_session.entry(session_id).or_default();
-        let mut decoded = if omitted_bytes > 0 && !pending.is_empty() {
-            decode_utf8(pending, /*flush*/ true)
-        } else {
-            String::new()
-        };
-        pending.extend(output);
+        pending.extend(head);
+        let mut decoded = decode_utf8(pending, /*flush*/ omitted_bytes > 0);
+        if omitted_bytes > 0 {
+            decoded.push_str(&format!("\n... {omitted_bytes} bytes omitted ...\n"));
+        }
+        pending.extend(tail);
         decoded.push_str(&decode_utf8(pending, /*flush*/ exit_code.is_some()));
         if exit_code.is_some() {
             pending_by_session.remove(&session_id);
@@ -296,10 +297,12 @@ pub unsafe extern "C" fn persistent_exec_poll(
                 output: runtime.decode_output(
                     request.session_id,
                     response.output,
+                    response.output_tail,
                     response.omitted_bytes,
                     response.exit_code,
                 ),
                 omitted_bytes: response.omitted_bytes,
+                original_bytes: response.original_bytes,
                 exit_code: response.exit_code,
             }),
             Err(error) => PersistentExecResult::error(error.kind(), error.message()),
@@ -421,6 +424,7 @@ struct SessionJson {
 struct PollJson {
     output: String,
     omitted_bytes: usize,
+    original_bytes: usize,
     exit_code: Option<i32>,
 }
 

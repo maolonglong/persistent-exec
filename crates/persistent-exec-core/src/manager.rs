@@ -30,8 +30,14 @@ pub struct SpawnRequest {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct PollResponse {
+    /// First retained bytes consumed by this poll.
     pub output: Vec<u8>,
+    /// Last retained bytes, contiguous with `output` unless `omitted_bytes` is nonzero.
+    pub output_tail: Vec<u8>,
+    /// Bytes discarded between the two retained segments.
     pub omitted_bytes: usize,
+    /// Retained plus omitted raw bytes consumed by this poll, before UTF-8 decoding.
+    pub original_bytes: usize,
     pub exit_code: Option<i32>,
 }
 
@@ -97,7 +103,7 @@ impl ExecRuntime {
             stderr_rx,
             exit_rx,
         } = spawned;
-        let session = Arc::new(Session::new(process));
+        let session = Arc::new(Session::new(process, request.tty));
 
         {
             let mut registry = self
@@ -134,7 +140,13 @@ impl ExecRuntime {
                 .remove(&session_id);
         }
         Ok(PollResponse {
+            original_bytes: output
+                .output
+                .len()
+                .saturating_add(output.output_tail.len())
+                .saturating_add(output.omitted_bytes),
             output: output.output,
+            output_tail: output.output_tail,
             omitted_bytes: output.omitted_bytes,
             exit_code: output.exit_code,
         })

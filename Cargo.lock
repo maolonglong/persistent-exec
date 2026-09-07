@@ -129,6 +129,7 @@ name = "persistent-exec-core"
 version = "0.1.3"
 dependencies = [
  "anyhow",
+ "libc",
  "persistent-exec-pty",
  "pretty_assertions",
  "serde",

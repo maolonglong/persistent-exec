@@ -23,13 +23,15 @@ struct SessionState {
 #[derive(Debug)]
 pub(crate) struct Session {
     process: ProcessHandle,
+    tty: bool,
     state: Mutex<SessionState>,
 }
 
 impl Session {
-    pub(crate) fn new(process: ProcessHandle) -> Self {
+    pub(crate) fn new(process: ProcessHandle, tty: bool) -> Self {
         Self {
             process,
+            tty,
             state: Mutex::new(SessionState::default()),
         }
     }
@@ -59,6 +61,9 @@ impl Session {
     }
 
     pub(crate) fn interrupt(&self) -> Result<()> {
+        if self.tty {
+            return self.write(vec![0x03]);
+        }
         match self.process.signal(ProcessSignal::Interrupt) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::Unsupported => self.write(vec![0x03]),
@@ -75,9 +80,10 @@ impl Session {
 
     pub(crate) fn take_output(&self) -> SessionOutput {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        let (output, omitted_bytes) = state.output.take();
+        let (output, output_tail, omitted_bytes) = state.output.take();
         SessionOutput {
             output,
+            output_tail,
             omitted_bytes,
             exit_code: state.exit_code,
         }
@@ -110,6 +116,7 @@ impl Session {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct SessionOutput {
     pub(crate) output: Vec<u8>,
+    pub(crate) output_tail: Vec<u8>,
     pub(crate) omitted_bytes: usize,
     pub(crate) exit_code: Option<i32>,
 }
