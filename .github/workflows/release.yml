@@ -6,9 +6,15 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Release version to validate without publishing
+        description: Existing release tag to validate or recover
         required: true
-        default: v0.1.3
+      source_ref:
+        description: Tag or commit to build (required only when recovering a release)
+        required: false
+      publish:
+        description: Publish a recovery run after validation
+        type: boolean
+        default: false
 
 env:
   RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
@@ -56,6 +62,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.0
@@ -83,6 +91,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24.19.0
@@ -107,6 +117,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24.19.0
@@ -119,15 +131,41 @@ jobs:
         env:
           PUBLISH_DRY_RUN: "1"
 
+  github-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > draft; then
+            test "$(cat draft)" = true || {
+              echo "GitHub Release $RELEASE_TAG is already public; refusing to overwrite it." >&2
+              exit 1
+            }
+            gh release delete "$RELEASE_TAG" --yes
+          fi
+          node scripts/release-notes.mjs "${RELEASE_TAG#v}" > release-notes.md
+          gh release create "$RELEASE_TAG" --draft --title "$RELEASE_TAG" --notes-file release-notes.md
+
   publish:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [native, javascript, verify]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true
+    needs: [native, javascript, verify, github-release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24.19.0
@@ -141,3 +179,30 @@ jobs:
       - run: node scripts/publish-packages.mjs artifacts "$RELEASE_TAG"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-github-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$RELEASE_TAG" --draft=false
+
+  cleanup-draft-release:
+    if: ${{ always() && (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true) && needs.publish.result == 'failure' }}
+    needs: [github-release, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete failed draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true; then
+            gh release delete "$RELEASE_TAG" --yes
+          fi
