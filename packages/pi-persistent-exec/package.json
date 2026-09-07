@@ -1,6 +1,6 @@
 {
   "name": "pi-persistent-exec",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Persistent shell sessions for pi",
   "keywords": [
     "persistent-exec",
@@ -30,8 +30,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "persistent-exec-bun": "0.1.3",
-    "persistent-exec-node": "0.1.3"
+    "persistent-exec-bun": "0.1.4",
+    "persistent-exec-node": "0.1.4"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.84.2",
