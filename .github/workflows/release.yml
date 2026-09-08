@@ -11,6 +11,9 @@ on:
       source_ref:
         description: Tag or commit to build (required only when recovering a release)
         required: false
+      artifact_run_id:
+        description: Original workflow run whose artifacts should be reused during recovery
+        required: false
       publish:
         description: Publish a recovery run after validation
         type: boolean
@@ -115,6 +118,9 @@ jobs:
   verify:
     needs: [native, javascript]
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -127,6 +133,8 @@ jobs:
           pattern: "*"
           path: artifacts
           merge-multiple: true
+          run-id: ${{ inputs.artifact_run_id || github.run_id }}
+          github-token: ${{ github.token }}
       - run: node scripts/publish-packages.mjs artifacts "$RELEASE_TAG"
         env:
           PUBLISH_DRY_RUN: "1"
@@ -160,6 +168,7 @@ jobs:
     needs: [native, javascript, verify, github-release]
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       id-token: write
     steps:
@@ -176,6 +185,8 @@ jobs:
           pattern: "*"
           path: artifacts
           merge-multiple: true
+          run-id: ${{ inputs.artifact_run_id || github.run_id }}
+          github-token: ${{ github.token }}
       - run: node scripts/publish-packages.mjs artifacts "$RELEASE_TAG"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
