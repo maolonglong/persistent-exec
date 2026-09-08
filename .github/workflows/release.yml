@@ -146,7 +146,9 @@ jobs:
           PUBLISH_DRY_RUN: "1"
 
   github-release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true
+    if: >-
+      always() && needs.verify.result == 'success' &&
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true)
     needs: verify
     runs-on: ubuntu-latest
     permissions:
@@ -170,7 +172,9 @@ jobs:
           gh release create "$RELEASE_TAG" --draft --title "$RELEASE_TAG" --notes-file release-notes.md
 
   publish:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true
+    if: >-
+      always() && needs.verify.result == 'success' && needs.github-release.result == 'success' &&
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true)
     needs: [verify, github-release]
     runs-on: ubuntu-latest
     permissions:
@@ -198,7 +202,9 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-github-release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true
+    if: >-
+      always() && needs.publish.result == 'success' &&
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true)
     needs: publish
     runs-on: ubuntu-latest
     permissions:
