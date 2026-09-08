@@ -24,6 +24,7 @@ env:
 
 jobs:
   native:
+    if: inputs.artifact_run_id == ''
     strategy:
       fail-fast: false
       matrix:
@@ -91,6 +92,7 @@ jobs:
           path: artifacts/*.tgz
 
   javascript:
+    if: inputs.artifact_run_id == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -116,6 +118,10 @@ jobs:
           path: artifacts/*.tgz
 
   verify:
+    if: >-
+      always() && !cancelled() &&
+      (needs.native.result == 'success' || needs.native.result == 'skipped') &&
+      (needs.javascript.result == 'success' || needs.javascript.result == 'skipped')
     needs: [native, javascript]
     runs-on: ubuntu-latest
     permissions:
@@ -165,7 +171,7 @@ jobs:
 
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true
-    needs: [native, javascript, verify, github-release]
+    needs: [verify, github-release]
     runs-on: ubuntu-latest
     permissions:
       actions: read
