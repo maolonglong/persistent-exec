@@ -1,6 +1,6 @@
 {
   "name": "persistent-exec-bin-linux-arm64-musl",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Native persistent-exec runtime for Linux ARM64 musl",
   "homepage": "https://github.com/maolonglong/pi-unified-exec#readme",
   "bugs": {
