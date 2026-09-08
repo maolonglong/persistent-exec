@@ -1,5 +1,5 @@
 {
-  "name": "pi-persistent-exec",
+  "name": "@chensl/pi-unified-exec",
   "version": "0.1.4",
   "description": "Persistent shell sessions for pi",
   "keywords": [
@@ -7,25 +7,29 @@
     "pi",
     "pi-extension",
     "pi-package",
-    "pty"
+    "pty",
+    "unified-exec"
   ],
-  "homepage": "https://github.com/maolonglong/persistent-exec#readme",
+  "homepage": "https://github.com/maolonglong/pi-unified-exec#readme",
   "bugs": {
-    "url": "https://github.com/maolonglong/persistent-exec/issues"
+    "url": "https://github.com/maolonglong/pi-unified-exec/issues"
   },
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maolonglong/persistent-exec.git",
-    "directory": "packages/pi-persistent-exec"
+    "url": "git+https://github.com/maolonglong/pi-unified-exec.git",
+    "directory": "packages/pi-unified-exec"
   },
   "files": [
     "src",
     "NOTICE"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "prepack": "node ../../scripts/stage-package-metadata.mjs pi-persistent-exec",
+    "prepack": "node ../../scripts/stage-package-metadata.mjs pi-unified-exec",
     "test": "bun test test",
     "typecheck": "tsc --noEmit"
   },

@@ -17,7 +17,11 @@ const packages = [
   ...platformPackages,
   { name: "persistent-exec-node", required: "dist/index.js" },
   { name: "persistent-exec-bun", required: "dist/index.js" },
-  { name: "pi-persistent-exec", required: "src/index.ts" },
+  {
+    name: "@chensl/pi-unified-exec",
+    artifactName: "chensl-pi-unified-exec",
+    required: "src/index.ts",
+  },
 ];
 
 const [artifactDirectory, releaseTag] = process.argv.slice(2);
@@ -47,8 +51,8 @@ function commandOutput(command, args) {
   return result.stdout;
 }
 
-const candidates = packages.map(({ name, required }) => {
-  const filename = `${name}-${version}.tgz`;
+const candidates = packages.map(({ name, artifactName = name, required }) => {
+  const filename = `${artifactName}-${version}.tgz`;
   const tarball = resolve(artifactDirectory, filename);
   if (!existsSync(tarball)) throw new Error(`missing release artifact: ${filename}`);
 
@@ -91,7 +95,7 @@ function requireExactDependencies(packageName, section, expectedNames) {
 const platformPackageNames = platformPackages.map(({ name }) => name);
 requireExactDependencies("persistent-exec-node", "optionalDependencies", platformPackageNames);
 requireExactDependencies("persistent-exec-bun", "optionalDependencies", platformPackageNames);
-requireExactDependencies("pi-persistent-exec", "dependencies", [
+requireExactDependencies("@chensl/pi-unified-exec", "dependencies", [
   "persistent-exec-node",
   "persistent-exec-bun",
 ]);

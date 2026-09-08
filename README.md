@@ -1,8 +1,8 @@
-# persistent-exec
+# pi-unified-exec
 
 Persistent shell sessions for [pi](https://github.com/badlogic/pi-mono).
 
-The `pi-persistent-exec` extension replaces pi's built-in `bash` tool with two tools:
+The `@chensl/pi-unified-exec` extension replaces pi's built-in `bash` tool with two tools:
 
 - `exec_command` starts a command and returns its result. If the command is still running, it returns a session ID instead.
 - `write_stdin` sends input to a running session or checks it for more output.
@@ -12,7 +12,7 @@ This lets pi run interactive commands and keep long-running processes alive betw
 ## Installation
 
 ```bash
-pi install npm:pi-persistent-exec
+pi install npm:@chensl/pi-unified-exec
 ```
 
 The extension works without additional configuration.

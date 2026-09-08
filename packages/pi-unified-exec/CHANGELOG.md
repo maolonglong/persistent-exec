@@ -1,0 +1,11 @@
+# Changelog
+
+## [Unreleased]
+
+### Breaking Changes
+
+- The pi extension is now published as `@chensl/pi-unified-exec` instead of `pi-persistent-exec`. Existing users must remove the old package and install the new scoped package.
+
+### Added
+
+- A reproducible release workflow that validates packages before publishing and creates GitHub Releases from this changelog.

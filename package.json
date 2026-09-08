@@ -1,19 +1,19 @@
 {
-  "name": "persistent-exec-workspace",
+  "name": "pi-unified-exec-workspace",
   "version": "0.1.4",
   "private": true,
-  "homepage": "https://github.com/maolonglong/persistent-exec#readme",
+  "homepage": "https://github.com/maolonglong/pi-unified-exec#readme",
   "bugs": {
-    "url": "https://github.com/maolonglong/persistent-exec/issues"
+    "url": "https://github.com/maolonglong/pi-unified-exec/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maolonglong/persistent-exec.git"
+    "url": "git+https://github.com/maolonglong/pi-unified-exec.git"
   },
   "workspaces": [
     "packages/persistent-exec-node",
     "packages/persistent-exec-bun",
-    "packages/pi-persistent-exec"
+    "packages/pi-unified-exec"
   ],
   "type": "module",
   "scripts": {

@@ -106,7 +106,7 @@ jobs:
       - run: mkdir -p artifacts
       - run: npm pack ./packages/persistent-exec-node --pack-destination artifacts
       - run: npm pack ./packages/persistent-exec-bun --pack-destination artifacts
-      - run: npm pack ./packages/pi-persistent-exec --pack-destination artifacts
+      - run: npm pack ./packages/pi-unified-exec --pack-destination artifacts
       - uses: actions/upload-artifact@v4
         with:
           name: javascript-packages
@@ -179,6 +179,11 @@ jobs:
       - run: node scripts/publish-packages.mjs artifacts "$RELEASE_TAG"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Deprecate renamed package
+        if: env.RELEASE_TAG == 'v0.1.5'
+        run: >-
+          npm deprecate 'pi-persistent-exec@*'
+          'Renamed to @chensl/pi-unified-exec. Install with: pi install npm:@chensl/pi-unified-exec'
 
   publish-github-release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || inputs.publish == true

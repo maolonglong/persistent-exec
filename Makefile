@@ -22,7 +22,7 @@ test-bun:
 	bun test packages/persistent-exec-bun/test
 
 test-pi:
-	bun test packages/pi-persistent-exec/test
+	bun test packages/pi-unified-exec/test
 
 build-release:
 	cargo build --release -p persistent-exec-ffi --locked

@@ -18,8 +18,8 @@ Audit release notes from the commit history before a release. This skill updates
    ```
 
    If no release tag is reachable, stop and ask for the intended baseline instead of guessing.
-3. Read `packages/pi-persistent-exec/CHANGELOG.md` and inspect its `[Unreleased]` section before changing it.
-4. For each commit since the tag, inspect its changed files and diff. Map observable changes across `core`, `ffi`, `pty`, `node`, `bun`, and `pi` to the user-facing `pi-persistent-exec` changelog.
+3. Read `packages/pi-unified-exec/CHANGELOG.md` and inspect its `[Unreleased]` section before changing it.
+4. For each commit since the tag, inspect its changed files and diff. Map observable changes across `core`, `ffi`, `pty`, `node`, `bun`, and `pi` to the user-facing `@chensl/pi-unified-exec` changelog.
 5. Skip release housekeeping, changelog-only changes, and internal-only refactors with no user-visible behavior. Do not skip bug fixes merely because their implementation is in a lower-level crate or wrapper.
 6. Add missing entries under `[Unreleased]` using this category order when present:
 

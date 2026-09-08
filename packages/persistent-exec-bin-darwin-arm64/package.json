@@ -2,14 +2,14 @@
   "name": "persistent-exec-bin-darwin-arm64",
   "version": "0.1.4",
   "description": "Native persistent-exec runtime for macOS ARM64",
-  "homepage": "https://github.com/maolonglong/persistent-exec#readme",
+  "homepage": "https://github.com/maolonglong/pi-unified-exec#readme",
   "bugs": {
-    "url": "https://github.com/maolonglong/persistent-exec/issues"
+    "url": "https://github.com/maolonglong/pi-unified-exec/issues"
   },
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maolonglong/persistent-exec.git",
+    "url": "git+https://github.com/maolonglong/pi-unified-exec.git",
     "directory": "packages/persistent-exec-bin-darwin-arm64"
   },
   "files": [

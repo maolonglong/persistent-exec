@@ -2,7 +2,7 @@
 
 ## Runtime invariants
 
-- Keep `persistent-exec-core` transport-neutral. Put C ABI concerns in `persistent-exec-ffi`, runtime-specific loading in the Node/Bun packages, and pi lifecycle/tool behavior in `pi-persistent-exec`.
+- Keep `persistent-exec-core` transport-neutral. Put C ABI concerns in `persistent-exec-ffi`, runtime-specific loading in the Node/Bun packages, and pi lifecycle/tool behavior in `@chensl/pi-unified-exec`.
 - Preserve the versioned C ABI and opaque runtime handle. Do not expose Rust layouts across FFI.
 - Keep one native runtime per pi session and terminate it on session replacement, extension reload, and shutdown.
 - Keep native output and session counts bounded. Partial output must be bounded as well as final output, and truncation metadata must include bytes omitted by the Rust runtime.
@@ -38,12 +38,12 @@
 ## Packaging
 
 - Keep platform package names synchronized across Node/Bun `optionalDependencies`, both `binary.ts` lookup maps, `scripts/stage-native.mjs`, and the release workflow matrix.
-- Publish npm packages in dependency order: platform binary packages first, Node/Bun wrappers second, and `pi-persistent-exec` last.
+- Publish npm packages in dependency order: platform binary packages first, Node/Bun wrappers second, and `@chensl/pi-unified-exec` last.
 - Keep package versions synchronized while wrappers use exact versions for native and runtime dependencies.
 
 ## Changelog and releases
 
-- `packages/pi-persistent-exec/CHANGELOG.md` is the source of truth for user-facing release notes. Keep one top-level `## [Unreleased]` section and add user-visible changes only; order categories as Breaking Changes, Added, Changed, Fixed, and Removed.
+- `packages/pi-unified-exec/CHANGELOG.md` is the source of truth for user-facing release notes. Keep one top-level `## [Unreleased]` section and add user-visible changes only; order categories as Breaking Changes, Added, Changed, Fixed, and Removed.
 - Treat released changelog sections as immutable. Before a release, audit changes since the prior `v*` tag and add missing user-visible entries under `[Unreleased]`; do not rewrite historical notes to conceal a shipped defect.
 - Release only from a clean local `main` with `npm run release:patch` or `npm run release:minor`. `scripts/release.mjs` owns version synchronization, verification, release commits/tags, and the next `[Unreleased]` section; do not perform these release steps manually.
 - Pushing a `v*` tag triggers real npm publication and requires explicit release authorization. Local preparation or verification does not authorize publishing. The release workflow makes the GitHub Release public only after npm publication succeeds.

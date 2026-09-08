@@ -1,9 +1,9 @@
-# pi-persistent-exec
+# @chensl/pi-unified-exec
 
 Persistent shell sessions for [pi](https://github.com/badlogic/pi-mono).
 
 ```bash
-pi install npm:pi-persistent-exec
+pi install npm:@chensl/pi-unified-exec
 ```
 
 The extension replaces pi's built-in `bash` tool with:

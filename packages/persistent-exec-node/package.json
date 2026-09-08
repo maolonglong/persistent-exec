@@ -2,14 +2,14 @@
   "name": "persistent-exec-node",
   "version": "0.1.4",
   "description": "Node.js FFI bindings for the persistent-exec native runtime",
-  "homepage": "https://github.com/maolonglong/persistent-exec#readme",
+  "homepage": "https://github.com/maolonglong/pi-unified-exec#readme",
   "bugs": {
-    "url": "https://github.com/maolonglong/persistent-exec/issues"
+    "url": "https://github.com/maolonglong/pi-unified-exec/issues"
   },
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maolonglong/persistent-exec.git",
+    "url": "git+https://github.com/maolonglong/pi-unified-exec.git",
     "directory": "packages/persistent-exec-node"
   },
   "files": [

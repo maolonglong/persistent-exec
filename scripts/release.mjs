@@ -18,9 +18,9 @@ const packagePaths = [
   "packages/persistent-exec-bin-win32-x64/package.json",
   "packages/persistent-exec-node/package.json",
   "packages/persistent-exec-bun/package.json",
-  "packages/pi-persistent-exec/package.json",
+  "packages/pi-unified-exec/package.json",
 ];
-const changelogPath = "packages/pi-persistent-exec/CHANGELOG.md";
+const changelogPath = "packages/pi-unified-exec/CHANGELOG.md";
 
 function run(command, args) {
   execFileSync(command, args, { stdio: "inherit" });
@@ -54,7 +54,7 @@ const manifests = new Map(
   packagePaths.map((path) => [path, JSON.parse(readFileSync(path, "utf8"))]),
 );
 const currentVersion = manifests.get(
-  "packages/pi-persistent-exec/package.json",
+  "packages/pi-unified-exec/package.json",
 ).version;
 if (
   ![...manifests.values()].every(
@@ -71,7 +71,7 @@ const unreleased =
   /^## \[Unreleased\]\s*\n([\s\S]*?)(?=^## \[|(?![\s\S]))/m.exec(changelog);
 if (!unreleased || !unreleased[1].trim()) {
   throw new Error(
-    "add at least one entry under pi-persistent-exec's [Unreleased] heading before release",
+    "add at least one entry under @chensl/pi-unified-exec's [Unreleased] heading before release",
   );
 }
 
@@ -92,7 +92,7 @@ lockfile.packages[""].version = version;
 for (const path of [
   "packages/persistent-exec-node",
   "packages/persistent-exec-bun",
-  "packages/pi-persistent-exec",
+  "packages/pi-unified-exec",
 ]) {
   const manifest = manifests.get(`${path}/package.json`);
   lockfile.packages[path].version = version;
@@ -149,7 +149,7 @@ run("git", [
   "-m",
   `Synchronize package and Rust workspace versions for v${version}. Freeze the current changelog entry before the tag triggers publication.`,
 ]);
-run("git", ["tag", "-a", `v${version}`, "-m", `persistent-exec v${version}`]);
+run("git", ["tag", "-a", `v${version}`, "-m", `pi-unified-exec v${version}`]);
 
 const releasedChangelog = readFileSync(changelogPath, "utf8");
 writeFileSync(

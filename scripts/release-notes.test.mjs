@@ -31,7 +31,7 @@ test("extracts one released changelog section as GitHub Release notes", () => {
       );
       assert.equal(
         notes,
-        "## persistent-exec v1.2.3\n\n### Added\n\n- New feature.\n",
+        "## pi-unified-exec v1.2.3\n\n### Added\n\n- New feature.\n",
       );
     },
   );
@@ -48,7 +48,7 @@ test("rejects release notes without a matching changelog section", () => {
             stdio: "pipe",
           },
         ),
-      /missing pi-persistent-exec changelog entry/,
+      /missing @chensl\/pi-unified-exec changelog entry/,
     );
   });
 });
