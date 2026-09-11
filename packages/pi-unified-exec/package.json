@@ -1,6 +1,6 @@
 {
   "name": "@chensl/pi-unified-exec",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Persistent shell sessions for pi",
   "keywords": [
     "persistent-exec",
@@ -34,8 +34,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "persistent-exec-bun": "0.1.5",
-    "persistent-exec-node": "0.1.5"
+    "persistent-exec-bun": "0.1.6",
+    "persistent-exec-node": "0.1.6"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.84.2",
