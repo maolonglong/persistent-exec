@@ -44,8 +44,9 @@
 ## Changelog and releases
 
 - `packages/pi-unified-exec/CHANGELOG.md` is the source of truth for user-facing release notes. Keep one top-level `## [Unreleased]` section and add user-visible changes only; order categories as Breaking Changes, Added, Changed, Fixed, and Removed.
-- Treat released changelog sections as immutable. Before a release, audit changes since the prior `v*` tag and add missing user-visible entries under `[Unreleased]`; do not rewrite historical notes to conceal a shipped defect.
-- Release only from a clean local `main` with `npm run release:patch` or `npm run release:minor`. `scripts/release.mjs` owns version synchronization, verification, release commits/tags, and the next `[Unreleased]` section; do not perform these release steps manually.
-- Pushing a `v*` tag triggers real npm publication and requires explicit release authorization. Local preparation or verification does not authorize publishing. The release workflow makes the GitHub Release public only after npm publication succeeds.
-- For a partially failed release, rerun the failed job or dispatch the release workflow with the original `release_tag`, its `source_ref`, `artifact_run_id`, and `publish: true`. Existing tarballs are integrity-checked and skipped; never create another tag or rebuild an already-partially-published version.
+- Treat released changelog sections as immutable. Use `managing-changelog` to audit the final changes since the prior stable `vX.Y.Z` tag; review requests are read-only unless editing is requested.
+- Use `releasing` for release preparation, publication, and recovery. During 0.x development, use patch for compatible additions/fixes and minor for breaking changes; document the migration path.
+- Release only from a clean local `main` containing the latest `origin/main`. `scripts/release.mjs` owns version synchronization, verification, release commits/tags, and the next `[Unreleased]` section; do not perform these release steps manually.
+- `npm run release:patch` and `npm run release:minor` push main and a `v*` tag, triggering real npm publication. Obtain explicit release authorization before invoking either command without `-- --check`; preparation and verification alone do not authorize publication. GitHub Releases become public only after npm publication succeeds.
+- Recover partial publication using the original tag and original artifacts. Existing tarballs must match published integrity before being skipped; never rebuild an already-partially-published version.
 - There is no unrelease path. Do not delete a public GitHub Release, retag, unpublish npm versions, or move dist-tags as routine recovery. Publish a corrective version instead.
