@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
@@ -245,7 +246,7 @@ export default function persistentExecExtension(pi: ExtensionAPI): void {
         : `${context.isPartial ? "Waiting" : "Waited"} for session ${args.session_id}`;
       const input = args.chars ? ` · ${previewInput(args.chars)}` : "";
       text.setText(
-        `${theme.fg("toolTitle", theme.bold(args.chars ? "↳" : "•"))} ${theme.fg("dim", `${label}${input}`)}`,
+        `${theme.fg("toolTitle", theme.bold(args.chars ? "↳" : "•"))} ${theme.fg("dim", sanitizeDisplayText(`${label}${input}`))}`,
       );
       return text;
     },
@@ -494,6 +495,15 @@ function updateRenderTimer(
   }
 }
 
+function sanitizeDisplayText(text: string): string {
+  // Strip sequences before controls so escape payloads do not become visible text.
+  // Remove leftover introducers too: partial output can end inside a sequence.
+  return stripVTControlCharacters(text).replace(
+    /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\ufff9-\ufffb]/g,
+    "",
+  );
+}
+
 function previewInput(input: string): string {
   const escaped = JSON.stringify(input);
   if ([...escaped].length <= INPUT_PREVIEW_CHARS) return escaped;
@@ -530,7 +540,9 @@ class ToolCallRenderComponent {
   update(command: string, theme: ToolTheme, expanded: boolean): void {
     this.theme = theme;
     this.expanded = expanded;
-    this.text.setText(`${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", command)}`);
+    this.text.setText(
+      `${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", sanitizeDisplayText(command))}`,
+    );
   }
 
   render(width: number): string[] {
@@ -563,7 +575,7 @@ class ToolResultRenderComponent extends Container {
     const details = result.details as Partial<ToolOutput> | undefined;
     const rawOutput = details?.output ?? (isError ? textContent(result) : "");
     const rendered = splitOutputNotice(rawOutput);
-    const output = rendered.output.trimEnd();
+    const output = sanitizeDisplayText(rendered.output).trimEnd();
 
     if (output) {
       const styledOutput = output

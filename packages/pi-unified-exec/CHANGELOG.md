@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Sanitize terminal control sequences in tool output and call previews before TUI rendering, without changing raw tool results.
+
 ## [0.1.5] - 2026-09-08
 
 ### Breaking Changes

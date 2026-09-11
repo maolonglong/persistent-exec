@@ -244,6 +244,115 @@ test("renders a compact output tail and full expanded output", () => {
   expect(expanded.render(80).join("\n")).toContain("line 1");
 });
 
+test("renders untrusted output as text without changing tool results", () => {
+  const output =
+    "中文🙂\tstart\x1b[31mRED\x1b[0m\x1b[2J\x1b[H\x1b[?25l" +
+    "\x1b]2;TITLE\x07\x1b]52;c;VEVTVA==\x1b\\" +
+    "\x00\x07\b\r\x7f\x9b2J\x85\ufff9end\nsecond";
+  const tools = createHarness().tools;
+  for (const name of ["exec_command", "write_stdin"]) {
+    const tool = tools.get(name)!;
+    for (const expanded of [false, true]) {
+      for (const isPartial of [false, true]) {
+        for (const isError of [false, true]) {
+          const context = renderContext({});
+          context.isError = isError;
+          const result = {
+            content: [{ type: "text", text: output }],
+            ...(isError ? {} : { details: { output, exit_code: 0 } }),
+          };
+          const before = JSON.stringify(result);
+          const component = tool.renderResult!(
+            result,
+            { expanded, isPartial },
+            plainTheme,
+            context,
+          );
+          const rendered = component.render(100).join("\n");
+          expect(rendered).toContain("中文🙂   startREDend");
+          expect(rendered).toContain("second");
+          expect(rendered).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f\ufff9-\ufffb]/);
+          expect(JSON.stringify(result)).toBe(before);
+        }
+      }
+    }
+  }
+});
+
+test("neutralizes incomplete escape sequences and untrusted call titles", () => {
+  const tools = createHarness().tools;
+  const exec = tools.get("exec_command")!;
+  for (const suffix of ["\x1b", "\x1b[", "\x1b]52;c;", "\x90payload", "\x1bPpayload"]) {
+    const output = `safe${suffix}`;
+    for (const expanded of [false, true]) {
+      const context = renderContext({ cmd: output });
+      context.expanded = expanded;
+      context.executionStarted = false;
+      const call = exec.renderCall!({ cmd: output }, plainTheme, context);
+      const result = exec.renderResult!(
+        { content: [], details: { output } },
+        { expanded, isPartial: true },
+        plainTheme,
+        context,
+      );
+      for (const component of [call, result]) {
+        const rendered = component.render(100).join("\n");
+        expect(rendered).toContain("safe");
+        expect(rendered).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
+      }
+    }
+  }
+  const args = { session_id: 1, chars: "\x9dtitle\x9c" };
+  const context = renderContext(args);
+  context.executionStarted = false;
+  const rendered = tools.get("write_stdin")!.renderCall!(args, plainTheme, context).render(100);
+  expect(rendered.join("\n")).not.toMatch(/[\x7f-\x9f]/);
+});
+
+test("keeps every streamed escape prefix safe when reusing render components", () => {
+  const tools = createHarness().tools;
+  const sequences = [
+    "\x1b[2J",
+    "\x1b]52;c;VEVTVA==\x1b\\",
+    "\x9d52;c;VEVTVA==\x9c",
+    "\x1bPpayload\x1b\\",
+  ];
+  for (const name of ["exec_command", "write_stdin"]) {
+    for (const expanded of [false, true]) {
+      const context = renderContext({});
+      for (const sequence of sequences) {
+        for (let length = 0; length <= sequence.length; length++) {
+          const output = `first\nsecond\nthird\nfourth\nfifth\nsafe${sequence.slice(0, length)}`;
+          const component = tools.get(name)!.renderResult!(
+            { content: [], details: { output } },
+            { expanded, isPartial: true },
+            plainTheme,
+            context,
+          );
+          context.lastComponent = component;
+          // keyHint uses the global theme; allow its SGR styling, not cursor/OSC controls.
+          const frame = component
+            .render(40)
+            .join("\n")
+            .replace(/\x1b\[[0-9;]*m/g, "");
+          expect(frame).toContain("safe");
+          expect(frame).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
+        }
+      }
+      const final = tools.get(name)!.renderResult!(
+        { content: [], details: { output: "finished", exit_code: 0 } },
+        { expanded, isPartial: false },
+        plainTheme,
+        context,
+      );
+      const frame = final.render(60).join("\n");
+      expect(frame).toContain("finished");
+      expect(frame).not.toContain("safe");
+      expect(frame).not.toContain("earlier lines");
+    }
+  }
+});
+
 test("renders live and persistent session states", () => {
   const exec = createHarness().tools.get("exec_command");
   if (!exec?.renderCall || !exec.renderResult)
